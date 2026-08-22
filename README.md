@@ -66,6 +66,14 @@ mic and persistence simply do not work from a plain `http://` LAN address.
 command, publish directory, cache policy and security headers from that
 file; there is nothing to fill in and no secrets to add.
 
+### Static Site, not Web Service
+
+Pick **Static Site**. A free-tier *web service* sleeps after ~15 minutes
+idle and cold-starts in roughly 50 seconds — a poor match for an app whose
+entire claim is "logged in under three seconds". A static site is free,
+CDN-backed and never sleeps. Render cannot convert one type into the
+other, so a service created as the wrong type has to be recreated.
+
 Or configure it by hand — any static host works the same way:
 
 | | |
@@ -87,6 +95,29 @@ npm run test:hosted   # serves dist/ from a dumb static server, runs the
 That serves `dist/` with nothing but a MIME table — no rewrites, no dev
 conveniences — because `vite preview` is friendlier than a real host and
 will hide problems a static host would not.
+
+### Containers
+
+`Dockerfile` builds the app and serves `dist/` through nginx with the same
+headers `render.yaml` sets — for a container host, a home NAS, or a Render
+*web service* if you already made one. It is the fallback, not the
+recommendation, for the cold-start reason above.
+
+```sh
+docker build -t nutrition-log . && docker run -p 8080:10000 nutrition-log
+```
+
+The container listens on `$PORT` (default 10000), which is what Render
+injects. All response headers live in the `server` block of
+`docker/nginx.conf.template` and nowhere else: in nginx an `add_header`
+inside a `location` *replaces* the inherited set instead of adding to it,
+so a per-location `Cache-Control` would silently drop the CSP and
+`X-Frame-Options` from the HTML page. Cache-Control is varied through a
+`map` for that reason.
+
+> Built and served, but **not** exercised end-to-end in CI — there is no
+> Docker daemon in the environment this was developed in. The nginx config
+> and the port substitution are verified; the image build is not.
 
 Two headers in `render.yaml` are load-bearing rather than decorative:
 `/assets/*` is `immutable` (Vite content-hashes those names, so it is safe
