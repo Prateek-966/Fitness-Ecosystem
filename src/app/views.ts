@@ -437,6 +437,52 @@ export function diagnosticsView(ctx: Ctx): HTMLElement {
           + 'label figure is ±22%, because that is what FSSAI actually permits.',
     })));
 
+  // ---- garmin ----
+  wrap.append(h('h2', { text: 'Body data (Garmin)' }));
+  const garminFile = h('input', { type: 'file', accept: '.csv,text/csv' });
+  garminFile.addEventListener('change', async () => {
+    const f = garminFile.files?.[0];
+    if (!f) return;
+    try {
+      const r = await ctx.store.importGarminCsv(await f.text());
+      ctx.rerender();
+      const bits = [];
+      if (r.activitiesInserted) bits.push(`${r.activitiesInserted} workouts`);
+      if (r.metricRows) bits.push(`${r.metricRows} daily values`);
+      toast(bits.length ? `Imported ${bits.join(', ')}.` : 'Nothing new in that file.', {
+        detail: r.skipped.length ? `${r.skipped.length} rows skipped` : undefined,
+      });
+    } catch (e) { toast((e as Error).message, { tone: 'error' }); }
+  });
+
+  const coverage = ctx.snap.sourceCoverage;
+  const garminCard = h('div', { class: 'card' },
+    field('Garmin CSV export (activities or wellness)', garminFile));
+
+  if (coverage.length) {
+    garminCard.append(h('ul', { class: 'list' }, ...coverage.map((c) => h('li', {},
+      h('span', { class: 'grow' },
+        h('div', { class: 'name', text: c.series.replace(/_/g, ' ') }),
+        h('div', { class: 'sub mono', text: `${c.first_seen} to ${c.last_seen}` })),
+      h('span', { class: 'pill', text: c.source }),
+      h('span', { class: 'kcal', text: String(c.n) })))));
+  }
+
+  garminCard.append(h('p', {
+    class: 'hint',
+    text: 'Exported files, not an API. Connecting to Garmin directly needs an OAuth secret '
+        + 'and a webhook endpoint, which would mean running a server that holds a token and '
+        + 'sees your health data — a steep price for data that arrives once a day.',
+  }));
+  garminCard.append(h('p', {
+    class: 'hint',
+    text: 'Its calorie figure is stored as its own estimate and is never added to any other. '
+        + 'The list above shows when each source starts: beginning a new one partway through '
+        + 'a series is a step change in measurement, which is the one thing the model cannot '
+        + 'cancel out — so it is a row you can see rather than a surprise in the residuals.',
+  }));
+  wrap.append(garminCard);
+
   // ---- history ----
   wrap.append(h('h2', { text: 'History' }));
   const file = h('input', { type: 'file', accept: '.csv,text/csv' });

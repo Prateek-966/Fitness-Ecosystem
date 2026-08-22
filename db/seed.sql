@@ -46,3 +46,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_imported_entry
     ON imported_entry (source, eaten_at, food_text, COALESCE(portion_text, ''));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_food_identity
     ON food (name, COALESCE(brand, ''), source, COALESCE(source_ref, ''));
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workout_session
+    ON workout_session (started_at, COALESCE(kind, ''));

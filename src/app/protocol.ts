@@ -3,6 +3,7 @@ import type { DayEntry, DayTotals, OrphanItem, PendingItem } from '../core/total
 import type { SettingKey } from '../core/settings';
 import type { FoodSource } from '../core/foodimport';
 import type { UtteranceOutcome } from '../core/resolve';
+import type { SourceCoverage } from '../core/garmin';
 
 /**
  * Everything the UI needs to draw itself, fetched in one round trip.
@@ -23,6 +24,8 @@ export interface Snapshot {
   settings: Record<SettingKey, number>;
   indexSize: number;
   foodCount: number;
+  /** Which body-data sources exist and over what span. Empty until imported. */
+  sourceCoverage: SourceCoverage[];
   persistent: boolean;
 }
 
@@ -45,6 +48,7 @@ export type Request =
   | { method: 'searchFoods'; q: string }
   | { method: 'importFood'; csv: string; source: FoodSource }
   | { method: 'importHealthify'; csv: string }
+  | { method: 'importGarmin'; csv: string }
   | { method: 'exportDb' };
 
 export interface Envelope { id: number; req: Request }

@@ -13,6 +13,7 @@ import { refreshWindows, slotFor } from '../core/mealslot';
 import { allSettings, setSetting } from '../core/settings';
 import { importHealthify, parseHealthifyCsv } from '../core/healthify';
 import { loadFoods, parseFoodCsv } from '../core/foodimport';
+import { importGarminCsv, sourceCoverage } from '../core/garmin';
 import { absNow, localDate } from '../core/clock';
 import type { Envelope, Reply, Request, Snapshot } from '../app/protocol';
 
@@ -51,6 +52,7 @@ function snapshot(): Snapshot {
     settings: allSettings(db),
     indexSize: db.get<{ n: number }>('SELECT COUNT(*) AS n FROM phrase_index')!.n,
     foodCount: db.get<{ n: number }>('SELECT COUNT(*) AS n FROM food')!.n,
+    sourceCoverage: sourceCoverage(db),
     persistent,
   };
 }
@@ -155,6 +157,11 @@ async function handle(req: Request): Promise<unknown> {
       const { rows, dropped } = parseHealthifyCsv(req.csv);
       const report = importHealthify(db, rows, dropped);
       refreshWindows(db, 'imported_entry');
+      return { report, snapshot: snapshot() };
+    }
+
+    case 'importGarmin': {
+      const report = importGarminCsv(db, req.csv);
       return { report, snapshot: snapshot() };
     }
 

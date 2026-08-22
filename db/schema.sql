@@ -294,6 +294,65 @@ WHERE se.source = (
 );
 
 
+-- Idempotency for imports. A re-exported month must not double every
+-- workout in it, and NULL kind must not defeat the constraint the way a
+-- plain UNIQUE would (see user_measure, section 3).
+CREATE UNIQUE INDEX ux_workout_session
+    ON workout_session (started_at, COALESCE(kind, ''));
+
+
+-- ------------------------------------------------------------
+-- 9b. DAILY BODY METRICS  [designed-for — no UI in v0]
+-- Sleep, REM, resting heart rate, HRV, stress. These are the
+-- reason to ingest Garmin at all; its calorie figure is the
+-- least interesting thing it produces.
+--
+-- Same shape as session_energy for the same reason: one row per
+-- (day, metric, SOURCE), and precedence resolved at read time in
+-- v_daily_metric. Two devices disagreeing about last night's
+-- sleep is a fact to store, not a conflict to resolve at write
+-- time — and a value that came from somewhere is worth more than
+-- one that came from an average of somewheres.
+-- ------------------------------------------------------------
+CREATE TABLE daily_metric (
+    log_date    TEXT NOT NULL,          -- local calendar day
+    metric      TEXT NOT NULL,          -- 'sleep_min','rem_min','deep_min',
+                                        -- 'rhr_bpm','hrv_ms','stress_avg',
+                                        -- 'body_battery_max','steps'
+    source      TEXT NOT NULL CHECK (source IN ('garmin','manual')),
+    value       REAL NOT NULL,
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (log_date, metric, source)
+);
+
+CREATE VIEW v_daily_metric AS
+SELECT dm.log_date, dm.metric, dm.source, dm.value
+FROM daily_metric dm
+WHERE dm.source = (
+    SELECT d2.source FROM daily_metric d2
+    WHERE d2.log_date = dm.log_date AND d2.metric = dm.metric
+    ORDER BY CASE d2.source WHEN 'garmin' THEN 0 WHEN 'manual' THEN 1 END
+    LIMIT 1
+);
+
+-- When each source started and stopped supplying data.
+--
+-- Beginning to ingest a new source partway through a series is a step
+-- change in measurement regime, which is the one thing an adaptive TDEE
+-- regression cannot cancel out. The model is not built yet; this view
+-- exists so that when it is, the boundary is a row you can see rather
+-- than a discontinuity someone has to rediscover from the residuals.
+CREATE VIEW v_source_coverage AS
+SELECT 'daily_metric' AS relation, metric AS series, source,
+       MIN(log_date) AS first_seen, MAX(log_date) AS last_seen, COUNT(*) AS n
+FROM daily_metric GROUP BY metric, source
+UNION ALL
+SELECT 'session_energy', 'session_kcal', se.source,
+       MIN(date(ws.started_at)), MAX(date(ws.started_at)), COUNT(*)
+FROM session_energy se JOIN workout_session ws ON ws.id = se.session_id
+GROUP BY se.source;
+
+
 -- ------------------------------------------------------------
 -- 10. CAPTURE TIMING
 -- Acceptance criterion 1 is "under 3 seconds, measured not

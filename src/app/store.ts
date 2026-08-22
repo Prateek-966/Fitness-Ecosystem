@@ -5,6 +5,7 @@ import type { SettingKey } from '../core/settings';
 import type { FoodSource } from '../core/foodimport';
 import type { LoadReport } from '../core/foodimport';
 import type { ImportReport } from '../core/healthify';
+import type { GarminReport } from '../core/garmin';
 
 /**
  * Main-thread handle on the database worker.
@@ -121,6 +122,13 @@ export class Store {
   async importHealthifyCsv(csv: string): Promise<ImportReport> {
     const r = this.adopt(await this.send<{ report: ImportReport; snapshot: Snapshot }>(
       { method: 'importHealthify', csv },
+    ));
+    return r.report;
+  }
+
+  async importGarminCsv(csv: string): Promise<GarminReport> {
+    const r = this.adopt(await this.send<{ report: GarminReport; snapshot: Snapshot }>(
+      { method: 'importGarmin', csv },
     ));
     return r.report;
   }

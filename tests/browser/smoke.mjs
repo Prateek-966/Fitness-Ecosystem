@@ -118,6 +118,31 @@ const diag = await page.locator('.card').first().innerText();
 check('capture timing was recorded', /median \d+ ms/.test(diag),
       (diag.match(/median[^\n]*/) ?? [''])[0]);
 
+// --- Garmin: body data lands, and never touches the food log ---
+const intakeBefore = await page.locator('.stat', { hasText: 'Intake index' }).innerText()
+  .catch(() => '');
+await page.setInputFiles('.card:has-text("Garmin CSV export") input[type=file]', {
+  name: 'wellness.csv', mimeType: 'text/csv',
+  buffer: Buffer.from([
+    'Date,Resting Heart Rate,Total Sleep,REM Sleep,Avg Overnight HRV,Steps',
+    '2026-08-20,48,7:24,1:32,62,"12,880"',
+    '2026-08-21,51,6:10,1:04,55,9210',
+  ].join('\n')),
+});
+await page.waitForTimeout(500);
+const coverage = await page.locator('.card:has-text("Garmin CSV export")').innerText();
+check('Garmin wellness import lands and reports coverage',
+      /rhr bpm/.test(coverage) && /2026-08-20/.test(coverage),
+      (coverage.match(/rhr bpm[^\n]*\n[^\n]*/) ?? [''])[0].replace(/\n/g, ' '));
+
+await page.click('nav.tabs button:has-text("Today")');
+await page.waitForTimeout(250);
+const intakeAfter = await page.locator('.stat', { hasText: 'Intake index' }).innerText();
+check('Garmin data does not move the intake total',
+      intakeBefore === '' || intakeAfter === intakeBefore,
+      intakeAfter.replace(/\n/g, ' '));
+await page.click('nav.tabs button:has-text("Diagnostics")');
+
 // --- backup: the whole database leaves as one SQLite file ---
 const [download] = await Promise.all([
   page.waitForEvent('download', { timeout: 10000 }),

@@ -180,6 +180,22 @@ What the history *is* good for:
 - deriving **when you actually eat**, so meal slots are yours rather than
   an app's assumption
 
+### Garmin export
+Activities become `workout_session` rows plus a Garmin `session_energy`
+row; wellness reports become `daily_metric` rows. Both are idempotent —
+re-importing an overlapping month corrects rather than duplicates.
+
+Garmin's calorie figure is stored as **its own estimate** and never added
+to any other. Diagnostics lists when each source began, because starting a
+new source partway through a series is a step change in measurement, and
+that is the one thing an adaptive model cannot cancel out.
+
+This is file import, not an API connection. Connecting to Garmin directly
+requires an OAuth client secret and a webhook endpoint to receive pushes —
+which means a server that holds a token and sees your health data in
+transit. That is a steep price for data that arrives once a day, and it
+would end the property that nothing ever leaves your device.
+
 ### Food reference data
 No food data ships with the app. You load a CSV; every value is stored
 with the source you named and the error band that source is good for.
@@ -230,8 +246,14 @@ device; months of logs with no copy elsewhere is its own data-loss risk.
 
 Not built, though the schema accommodates them without migration:
 
-Garmin ingestion · adaptive TDEE model · goals and targets · exercise
+Garmin *API* sync · adaptive TDEE model · goals and targets · exercise
 logger · micronutrient UI · recommendation engine · templates beyond what
 `phrase_index` gives free · accounts · sync · sharing.
+
+Garmin **file import** is built (§10) because the owner asked for it; it
+needs no server and reuses the existing importer pattern. There is still
+no UI reading those metrics back beyond a coverage summary — the brief
+puts sleep/HRV/stress displays out of scope until there is a model to
+feed.
 
 The single largest risk to this project is scope creep.

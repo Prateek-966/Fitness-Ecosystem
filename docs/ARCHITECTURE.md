@@ -265,7 +265,9 @@ and will hide problems a static host would not.
 The schema accommodates these so none needs a migration; the app
 implements none of them:
 
-- Garmin ingestion (stress, HRV, sleep, RHR)
+- Garmin *API* sync. File import of Garmin exports **is** built
+  (`src/core/garmin.ts`); live OAuth sync is not, and would require a
+  server holding a token — see TECHNICAL_SPEC §13
 - The adaptive TDEE model, goals, calorie targets
 - The exercise logger (`workout_session` / `session_energy` exist, unused)
 - Micronutrient UI

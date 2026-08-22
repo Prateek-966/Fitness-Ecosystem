@@ -199,6 +199,40 @@ This is what makes double-counting *structurally impossible* rather than
 merely discouraged: the view emits exactly one row per session, so no
 `SUM` can ever pick up two estimates of the same workout.
 
+## 9b. `daily_metric` — body data from Garmin
+
+Sleep, REM, deep sleep, resting heart rate, HRV, stress, body battery,
+steps. These are the reason to ingest Garmin at all; its calorie figure is
+the least interesting number it produces.
+
+Same shape as `session_energy`, for the same reason: one row per
+**(day, metric, source)**, precedence resolved at read time in
+`v_daily_metric`. Two devices disagreeing about last night's sleep is a
+fact to store, not a conflict to settle at write time.
+
+| Column | Notes |
+|---|---|
+| `log_date` | local calendar day |
+| `metric` | `sleep_min`, `rem_min`, `deep_min`, `rhr_bpm`, `hrv_ms`, `stress_avg`, `body_battery_max`, `steps` |
+| `source` | `garmin` \| `manual` |
+| `value` | the measurement |
+
+`v_daily_metric` emits exactly one row per (day, metric), preferring
+`garmin` over `manual`.
+
+`v_source_coverage` reports when each source starts and stops, across both
+`daily_metric` and `session_energy`. Beginning to ingest a new source
+partway through a series is a **step change in measurement regime** — the
+one thing an adaptive TDEE regression cannot cancel. The model is not
+built yet; this view exists so that when it is, the boundary is a row
+someone can see rather than a discontinuity they must rediscover from the
+residuals.
+
+`ux_workout_session ON (started_at, COALESCE(kind, ''))` makes activity
+import idempotent. `COALESCE` for the third time, for the third reason
+(SCHEMA §3, §12): a NULL `kind` would otherwise defeat a plain UNIQUE and
+duplicate every workout in a re-exported month.
+
 ## 10. `capture_timing`
 
 Acceptance criterion 1 says "under 3 seconds, **measured not estimated**".

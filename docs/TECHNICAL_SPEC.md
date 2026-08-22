@@ -332,6 +332,37 @@ meal on the wrong day, and day boundaries are model input.
 known. It **suggests**; it never binds. Attaching a name from someone
 else's database to a food is a food-identity decision.
 
+### Garmin — `src/core/garmin.ts`
+File import, not an API. The obstacle is architectural, not technical:
+Garmin's developer programme needs an OAuth **client secret** and a
+**webhook endpoint** to push to. A static site can hold neither — anything
+shipped to a browser is public, and there is nowhere for a push to land.
+Connecting directly means running a server that holds a Garmin token and
+sees health data in transit, which spends the local-first property for a
+convenience on data that arrives once a day.
+
+Handles both export shapes, detected from headers rather than by asking:
+activity exports become `workout_session` + a **Garmin-sourced**
+`session_energy` row; wellness reports become `daily_metric` rows.
+
+Three things the parser gets right that are easy to get wrong:
+
+- **A two-part duration is genuinely ambiguous.** `"45:12"` of activity
+  time is 45 min 12 s; `"7:24"` of sleep is 7 h 24 min — identical
+  formatting, 60× apart. The *caller* states which column it is reading;
+  the parser never guesses, because a sleep figure 60× too small is
+  entirely plausible to a model.
+- **`--` and blank are missing, never zero.** A day the watch spent on the
+  charger is not a zero-step day.
+- **Longest alias first**, so `sleep` does not swallow `deep sleep` and
+  `rem sleep`.
+
+Malformed dates are skipped and reported. Import is idempotent on
+`(started_at, kind)` and `(log_date, metric, source)`.
+
+`sourceCoverage()` reads `v_source_coverage`: when each source starts and
+stops, so a regime change is visible rather than latent.
+
 ### Food data — `src/core/foodimport.ts`
 Any CSV with a name column and ≥1 recognised nutrient column. Aliases map
 to canonical keys; unrecognised columns are reported, not guessed.

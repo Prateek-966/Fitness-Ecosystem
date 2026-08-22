@@ -18,7 +18,8 @@
     "test:browser": "vite build && node tests/browser/run.mjs",
     "test:all": "npm test && npm run test:browser && npm run test:hosted",
     "icons": "node scripts/make-icons.mjs",
-    "test:hosted": "vite build && node tests/browser/hosted.mjs"
+    "test:hosted": "vite build && node tests/browser/hosted.mjs",
+    "import-garmin": "tsx scripts/import-garmin.ts"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.50.1-build1"
