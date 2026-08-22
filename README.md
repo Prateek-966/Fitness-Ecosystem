@@ -47,6 +47,48 @@ The CLI writes to `data/nutrition.sqlite3` (gitignored). Override with
 
 ---
 
+## Deploying
+
+The app is a folder of static files. It has no server, no database, no
+environment secret and nothing to leak — every byte of personal data lives
+in the visitor's own browser. What hosting buys is **HTTPS**, and that is
+not cosmetic: Web Speech and OPFS both require a secure context, so the
+mic and persistence simply do not work from a plain `http://` LAN address.
+
+`render.yaml` in the repo root is a Render Blueprint. On Render:
+**New → Blueprint → connect this repo → Apply**. It picks up the build
+command, publish directory, cache policy and security headers from that
+file; there is nothing to fill in and no secrets to add.
+
+Or configure it by hand — any static host works the same way:
+
+| | |
+|---|---|
+| Build command | `npm ci --include=dev && npm run build` |
+| Publish directory | `dist` |
+| Rewrites | none — the app has no client-side router |
+
+`--include=dev` is deliberate: hosts set `NODE_ENV=production`, which
+makes npm skip devDependencies, and `vite` and `typescript` live there.
+
+Verify the built output before trusting a deploy:
+
+```sh
+npm run test:hosted   # serves dist/ from a dumb static server, runs the
+                      # full browser suite against it, checks the SW
+```
+
+That serves `dist/` with nothing but a MIME table — no rewrites, no dev
+conveniences — because `vite preview` is friendlier than a real host and
+will hide problems a static host would not.
+
+Two headers in `render.yaml` are load-bearing rather than decorative:
+`/assets/*` is `immutable` (Vite content-hashes those names, so it is safe
+and it is what makes repeat loads instant), and `sw.js` is `no-cache` — a
+cached service worker is a site that can never update itself again.
+
+---
+
 ## Stack, and why
 
 A **mobile PWA**: Web Speech API for STT, SQLite compiled to WASM with
