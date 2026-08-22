@@ -65,11 +65,12 @@ export class Store {
   }
 
   async log(
-    transcript: string, o: { micTap: number; sttReturned: number; confidence: number | null },
+    transcript: string,
+    o: { micTap: number; sttReturned: number; confidence: number | null; mealSlot?: string | null },
   ): Promise<LogResult['outcome']> {
     const r = this.adopt(await this.send<LogResult>({
       method: 'log', transcript, micTap: o.micTap, sttReturned: o.sttReturned,
-      confidence: o.confidence,
+      confidence: o.confidence, mealSlot: o.mealSlot ?? null,
     }));
     return r.outcome;
   }

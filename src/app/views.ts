@@ -7,7 +7,13 @@ import { normalise, parse } from '../core/parse';
 
 /** Views draw from one snapshot; mutations go to the worker and hand back a new one. */
 export type Rerender = () => void;
-type Ctx = { store: Store; snap: Snapshot; rerender: Rerender };
+type Ctx = {
+  store: Store;
+  snap: Snapshot;
+  rerender: Rerender;
+  /** Focus capture on a given meal slot. Supplied by main.ts. */
+  onAddTo?: (slot: string | null) => void;
+};
 
 const after = (ctx: Ctx, p: Promise<unknown>, msg: string) =>
   p.then(() => { ctx.rerender(); toast(msg); })
@@ -15,37 +21,110 @@ const after = (ctx: Ctx, p: Promise<unknown>, msg: string) =>
 
 // ------------------------------------------------------------------
 // TODAY
+//
+// Grouped by meal, because that is how a day is actually remembered.
+// The sections are YOUR meal windows, clustered from when you really
+// log - not a schedule this app decided you keep.
+//
+// What each section shows is what you ate. There is deliberately no
+// "0 of 612 Cal": a per-meal target is a decision made for you, and a
+// zero for a meal you have not logged yet is the silent under-count this
+// whole design exists to prevent.
 // ------------------------------------------------------------------
 export function todayView(ctx: Ctx): HTMLElement {
-  const { totals, entries } = ctx.snap;
+  const { totals, entries, mealWindows } = ctx.snap;
   const find = (n: string) => totals.nutrients.find((x) => x.nutrient === n);
   const kcal = find('kcal');
 
-  const card = h('div', { class: 'card' },
-    h('div', { class: 'totals' },
-      stat('Intake index', kcal ? fmt.kcal(kcal.total) : '—',
-           kcal ? `± ${fmt.kcal(kcal.absError)}` : 'nothing logged yet'),
-      ...(['protein_g', 'carb_g', 'fat_g'] as const)
-        .map(find)
-        .filter((m): m is NonNullable<typeof m> => Boolean(m))
-        .map((m) => stat(m.nutrient.replace('_g', ''), `${Math.round(m.total)} g`,
-                         `± ${Math.round(m.absError)} g`))));
+  const head = h('div', { class: 'card intake' },
+    h('div', { class: 'intake-main' },
+      h('div', {},
+        h('div', { class: 'label', text: 'Intake index' }),
+        h('div', { class: 'intake-value', text: kcal ? fmt.kcal(kcal.total) : '0' }),
+        h('div', { class: 'err', text: kcal ? `plus or minus ${fmt.kcal(kcal.absError)}` : 'nothing logged yet' })),
+      h('div', { class: 'macro-grid' },
+        ...(['protein_g', 'carb_g', 'fat_g'] as const).map((n) => {
+          const m = find(n);
+          return h('div', { class: 'macro' },
+            h('div', { class: 'macro-name', text: n.replace('_g', '') }),
+            h('div', { class: 'macro-value', text: m ? `${Math.round(m.total)} g` : '—' }));
+        }))));
 
   if (!totals.complete) {
-    // A day with pending entries is under-logged by a known amount. Say so
-    // rather than showing a number that looks complete.
-    card.append(h('div', { class: 'incomplete' },
+    head.append(h('div', { class: 'incomplete' },
       `${totals.pendingCount} ${totals.pendingCount === 1 ? 'entry is' : 'entries are'} missing `
       + 'an amount, so this total is low and today is excluded from the model. '
       + 'Clear the queue to close it.'));
   }
 
-  return h('div', {}, card,
-    h('h2', { text: 'Today' }),
-    h('div', { class: 'card' },
-      entries.length
-        ? h('ul', { class: 'list' }, ...entries.map((e) => entryRow(ctx, e)))
-        : h('div', { class: 'empty', text: 'Nothing logged yet today. Tap the mic.' })));
+  const wrap = h('div', {}, head);
+
+  // Section order comes from the derived centres, so the day reads in the
+  // order you actually eat rather than in an order chosen for you.
+  const ordered = [...mealWindows].sort((a, b) => a.centreMin - b.centreMin);
+  const bySlot = new Map<string, typeof entries>();
+  for (const e of entries) {
+    const key = e.mealSlot ?? '__unsorted';
+    const list = bySlot.get(key) ?? [];
+    list.push(e);
+    bySlot.set(key, list);
+  }
+
+  if (ordered.length === 0) {
+    // No windows derived yet. Show one honest list rather than inventing
+    // breakfast/lunch/dinner boundaries this app has not earned.
+    wrap.append(mealSection(ctx, null, entries, null));
+  } else {
+    for (const w of ordered) {
+      wrap.append(mealSection(ctx, w.slot, bySlot.get(w.slot) ?? [], w));
+    }
+    const unsorted = bySlot.get('__unsorted') ?? [];
+    if (unsorted.length) wrap.append(mealSection(ctx, null, unsorted, null));
+  }
+
+  return wrap;
+}
+
+const SLOT_LABEL: Record<string, string> = {
+  breakfast: 'Breakfast', lunch: 'Lunch', snack: 'Snack', dinner: 'Dinner',
+};
+
+const hhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+
+function mealSection(
+  ctx: Ctx,
+  slot: string | null,
+  rows: Snapshot['entries'],
+  window: Snapshot['mealWindows'][number] | null,
+): HTMLElement {
+  const kcal = rows.reduce((sum, e) => sum + (e.kcal ?? 0), 0);
+  const pending = rows.filter((e) => e.status !== 'resolved').length;
+
+  const header = h('div', { class: 'meal-head' },
+    h('div', { class: 'grow' },
+      h('div', { class: 'meal-name', text: slot ? SLOT_LABEL[slot] ?? slot : 'Logged' }),
+      window
+        ? h('div', { class: 'sub mono', text: `usually ${hhmm(window.centreMin)}` })
+        : null),
+    // A total, not a target. What you ate, not what you are allowed.
+    h('div', { class: 'meal-kcal', text: rows.length ? fmt.kcal(kcal) : '' }),
+    h('button', {
+      class: 'add', title: slot ? `log to ${SLOT_LABEL[slot] ?? slot}` : 'log',
+      text: '+',
+      onclick: () => ctx.onAddTo?.(slot),
+    }));
+
+  const body = rows.length
+    ? h('ul', { class: 'list' }, ...rows.map((e) => entryRow(ctx, e)))
+    : h('div', { class: 'empty quiet', text: 'nothing yet' });
+
+  const card = h('div', { class: 'card meal' }, header, body);
+  if (pending) {
+    card.append(h('div', { class: 'meal-note', text:
+      `${pending} not counted yet — needs an amount` }));
+  }
+  return card;
 }
 
 function stat(label: string, value: string, err: string): HTMLElement {

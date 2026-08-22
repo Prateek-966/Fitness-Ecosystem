@@ -64,8 +64,8 @@ check('food reference CSV loads in the browser', /2/.test(foods), foods.replace(
 
 // --- a first log takes the slow path, because the index is empty ---
 await page.click('nav.tabs button:has-text("Today")');
-await page.fill('.card input[type=text]', 'two rotis');
-await page.press('.card input[type=text]', 'Enter');
+await page.fill('.capture input[type=text]', 'two rotis');
+await page.press('.capture input[type=text]', 'Enter');
 await page.waitForTimeout(300);
 const firstToast = await page.locator('#toast').innerText();
 check('an unknown phrase is queued, not guessed', /queue/i.test(firstToast), firstToast.replace(/\n/g, ' '));
@@ -91,8 +91,8 @@ check('household measure calibration saves', true);
 
 // --- the same phrase again should now be an exact match ---
 await page.click('nav.tabs button:has-text("Today")');
-await page.fill('.card input[type=text]', 'two rotis');
-await page.press('.card input[type=text]', 'Enter');
+await page.fill('.capture input[type=text]', 'two rotis');
+await page.press('.capture input[type=text]', 'Enter');
 await page.waitForTimeout(300);
 const secondToast = await page.locator('#toast').innerText();
 check('the learned phrase is instant the second time', /Logged roti/.test(secondToast),
@@ -101,8 +101,9 @@ check('the learned phrase is instant the second time', /Logged roti/.test(second
 // 1 roti (45 g) from the slow path + 2 rotis (90 g) from the fast path,
 // at 297 kcal/100 g = 401. The number has to come from the loaded CSV,
 // not from anything hard-coded in the app.
-const intake = await page.locator('.stat', { hasText: 'Intake index' }).innerText();
-const shown = Number((intake.match(/([\d,]+)\s*\n?\s*±/) ?? [])[1]?.replace(/,/g, ''));
+const intake = await page.locator('.intake').innerText();
+// innerText returns CSS-transformed text, so the label reads uppercase.
+const shown = Number((intake.match(/intake index\s*\n?\s*([\d,]+)/i) ?? [])[1]?.replace(/,/g, ''));
 check('the intake index is computed from the loaded food data',
       Math.abs(shown - 401) <= 1, intake.replace(/\n/g, ' '));
 
@@ -119,8 +120,7 @@ check('capture timing was recorded', /median \d+ ms/.test(diag),
       (diag.match(/median[^\n]*/) ?? [''])[0]);
 
 // --- Garmin: body data lands, and never touches the food log ---
-const intakeBefore = await page.locator('.stat', { hasText: 'Intake index' }).innerText()
-  .catch(() => '');
+const intakeBefore = await page.locator('.intake-value').innerText().catch(() => '');
 await page.setInputFiles('.card:has-text("Garmin CSV export") input[type=file]', {
   name: 'wellness.csv', mimeType: 'text/csv',
   buffer: Buffer.from([
@@ -137,7 +137,7 @@ check('Garmin wellness import lands and reports coverage',
 
 await page.click('nav.tabs button:has-text("Today")');
 await page.waitForTimeout(250);
-const intakeAfter = await page.locator('.stat', { hasText: 'Intake index' }).innerText();
+const intakeAfter = await page.locator('.intake-value').innerText();
 check('Garmin data does not move the intake total',
       intakeBefore === '' || intakeAfter === intakeBefore,
       intakeAfter.replace(/\n/g, ' '));

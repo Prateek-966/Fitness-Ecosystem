@@ -4,6 +4,7 @@ import type { SettingKey } from '../core/settings';
 import type { FoodSource } from '../core/foodimport';
 import type { UtteranceOutcome } from '../core/resolve';
 import type { SourceCoverage } from '../core/garmin';
+import type { SlotWindow } from '../core/mealslot';
 
 /**
  * Everything the UI needs to draw itself, fetched in one round trip.
@@ -26,6 +27,8 @@ export interface Snapshot {
   foodCount: number;
   /** Which body-data sources exist and over what span. Empty until imported. */
   sourceCoverage: SourceCoverage[];
+  /** Derived from your own timestamps. Empty until there is enough of them. */
+  mealWindows: SlotWindow[];
   persistent: boolean;
 }
 
@@ -37,7 +40,8 @@ export interface LogResult {
 export type Request =
   | { method: 'boot' }
   | { method: 'snapshot' }
-  | { method: 'log'; transcript: string; micTap: number; sttReturned: number; confidence: number | null }
+  | { method: 'log'; transcript: string; micTap: number; sttReturned: number;
+      confidence: number | null; mealSlot?: string | null }
   | { method: 'undo'; utteranceId: number }
   | { method: 'revise'; entryId: number; field: string; value: string | number | null; reason: string }
   | { method: 'resolveSlowPath'; utteranceId: number; phrase: string; foodId: number;

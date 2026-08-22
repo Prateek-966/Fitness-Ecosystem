@@ -9,7 +9,7 @@ import {
 import { recordTiming } from '../core/timing';
 import { diagnostics, refreshAllStats } from '../core/stats';
 import { dayEntries, dayTotals, orphanItems, pendingQueue } from '../core/totals';
-import { refreshWindows, slotFor } from '../core/mealslot';
+import { autoRefreshWindows, listWindows, refreshWindows, slotFor } from '../core/mealslot';
 import { allSettings, setSetting } from '../core/settings';
 import { importHealthify, parseHealthifyCsv } from '../core/healthify';
 import { loadFoods, parseFoodCsv } from '../core/foodimport';
@@ -53,15 +53,14 @@ function snapshot(): Snapshot {
     indexSize: db.get<{ n: number }>('SELECT COUNT(*) AS n FROM phrase_index')!.n,
     foodCount: db.get<{ n: number }>('SELECT COUNT(*) AS n FROM food')!.n,
     sourceCoverage: sourceCoverage(db),
+    mealWindows: listWindows(db),
     persistent,
   };
 }
 
 function refresh(): void {
   refreshAllStats(db);
-  if (db.get<{ n: number }>('SELECT COUNT(*) AS n FROM imported_entry')!.n > 0) {
-    refreshWindows(db, 'imported_entry');
-  }
+  autoRefreshWindows(db);
 }
 
 async function handle(req: Request): Promise<unknown> {
@@ -92,7 +91,10 @@ async function handle(req: Request): Promise<unknown> {
           spokenAt,
           tzOffsetMin: -spokenAt.getTimezoneOffset(),
         },
-        slotFor(db, spokenAt),
+        // An explicit choice wins: logging breakfast at 3pm because you
+        // forgot is a normal thing to do, and the clock should not
+        // overrule you about it.
+        req.mealSlot ?? slotFor(db, spokenAt),
       );
       const totalMs = recordTiming(
         db, outcome.utteranceId,

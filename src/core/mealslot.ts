@@ -144,6 +144,38 @@ export function deriveWindows(timestamps: string[]): SlotWindow[] {
 const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+/**
+ * Derive windows from whatever record of your behaviour exists.
+ *
+ * Imported history first, because six months beats six days. Failing
+ * that, your own log once there is enough of it - a handful of entries
+ * describes a habit no better than a coin describes a distribution, and
+ * windows that lurch about each time you log lunch are worse than no
+ * windows at all.
+ *
+ * Returns null when neither source qualifies. A day that is not yet
+ * grouped is honest; groups invented from a default schedule are not.
+ */
+export const MIN_ENTRIES_TO_DERIVE = 8;
+
+export function autoRefreshWindows(db: Db): SlotWindow[] {
+  const imported = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM imported_entry')!.n;
+  if (imported >= MIN_ENTRIES_TO_DERIVE) return refreshWindows(db, 'imported_entry');
+
+  const logged = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM log_entry')!.n;
+  if (logged >= MIN_ENTRIES_TO_DERIVE) return refreshWindows(db, 'log_entry');
+
+  return [];
+}
+
+export function listWindows(db: Db): SlotWindow[] {
+  return db.all<any>(
+    `SELECT slot, centre_min AS centreMin, start_min AS startMin,
+            end_min AS endMin, n_observations AS nObservations
+     FROM meal_slot_window ORDER BY centre_min`,
+  );
+}
+
 export function refreshWindows(
   db: Db, from: 'imported_entry' | 'log_entry' = 'imported_entry',
 ): SlotWindow[] {

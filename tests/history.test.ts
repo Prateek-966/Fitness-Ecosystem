@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { addFood, calibrate, freshDb, indexPhrase } from './helpers';
 import type { Db } from '../src/core/db';
 import { importHealthify, parseHealthifyCsv, phraseCandidates } from '../src/core/healthify';
-import { cluster, deriveWindows, refreshWindows, slotFor } from '../src/core/mealslot';
+import {
+  autoRefreshWindows, cluster, deriveWindows, listWindows, refreshWindows, slotFor,
+} from '../src/core/mealslot';
 import { diagnostics, writeDayStats } from '../src/core/stats';
 import { handleUtterance } from '../src/core/resolve';
 import { recordTiming } from '../src/core/timing';
@@ -250,5 +252,54 @@ describe('workout energy precedence', () => {
     db.run("INSERT INTO session_energy VALUES (1,'met_estimate',380,'2026-08-22T08:00:00')");
     db.run("INSERT INTO session_energy VALUES (1,'manual',500,'2026-08-22T08:00:00')");
     expect(db.get<{ source: string }>('SELECT source FROM v_session_energy')!.source).toBe('met_estimate');
+  });
+});
+
+describe('meal windows derive from whatever record of behaviour exists', () => {
+  const spread = (day: string) => [
+    `${day}T08:15:00`, `${day}T13:20:00`, `${day}T17:30:00`, `${day}T20:45:00`,
+  ];
+
+  it('prefers imported history, because six months beats six days', () => {
+    const rows = ['2026-03-20', '2026-03-21', '2026-03-22'].flatMap((d) =>
+      spread(d).map((t) => ({ eatenAt: t, foodText: 'Poha', portionText: '1 katori' })));
+    importHealthify(db, rows);
+    const w = autoRefreshWindows(db);
+    expect(w.map((x) => x.slot)).toEqual(['breakfast', 'lunch', 'snack', 'dinner']);
+    expect(db.get<{ derived_from: string }>(
+      'SELECT derived_from FROM meal_slot_window LIMIT 1')!.derived_from).toBe('imported_entry');
+  });
+
+  it('falls back to your own log when there is no import', () => {
+    const roti = addFood(db, 'Roti', 297, { defaultUnit: 'piece' });
+    indexPhrase(db, 'roti', roti, 1, 'piece');
+    calibrate(db, 'piece', 45);
+    for (const t of [...spread('2026-08-20'), ...spread('2026-08-21')]) {
+      handleUtterance(db, { rawText: 'two rotis', spokenAt: new Date(t), tzOffsetMin: 0 });
+    }
+    const w = autoRefreshWindows(db);
+    expect(w.length).toBeGreaterThan(0);
+    expect(db.get<{ derived_from: string }>(
+      'SELECT derived_from FROM meal_slot_window LIMIT 1')!.derived_from).toBe('log_entry');
+  });
+
+  it('derives nothing from too little data rather than inventing a schedule', () => {
+    // Three entries describe a habit no better than a coin describes a
+    // distribution. A day that is not yet grouped is honest; groups
+    // invented from a default timetable are not.
+    importHealthify(db, spread('2026-03-20').slice(0, 3).map((t) => ({
+      eatenAt: t, foodText: 'Poha', portionText: null,
+    })));
+    expect(autoRefreshWindows(db)).toEqual([]);
+    expect(listWindows(db)).toEqual([]);
+  });
+
+  it('never hard-codes a window: different habits give different centres', () => {
+    const early = ['2026-03-20', '2026-03-21'].flatMap((d) =>
+      ['06:00', '11:00', '15:00', '18:30'].map((t) => ({
+        eatenAt: `${d}T${t}:00`, foodText: 'X', portionText: null })));
+    importHealthify(db, early);
+    const centres = autoRefreshWindows(db).map((w) => Math.round(w.centreMin));
+    expect(centres).toEqual([360, 660, 900, 1110]);
   });
 });

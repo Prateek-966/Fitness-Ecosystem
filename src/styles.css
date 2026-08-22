@@ -1,26 +1,31 @@
-/* Deliberately small. The UI is a mic button and a list; anything more
-   is time not spent on the thing being tested. */
+/* Deliberately small. The UI is a mic button and a day; anything more is
+   time not spent on the thing being tested.
+
+   Light-first, card-led, generously spaced - the shape of a food log
+   people actually keep. Dark is a full swap, not an afterthought. */
 
 :root {
-  --bg: #111417;
-  --surface: #191d21;
-  --surface-2: #21262b;
-  --line: #2b3138;
-  --text: #e8edf2;
-  --muted: #8d9aa6;
-  --accent: #5ec8a0;
-  --warn: #e0a458;
-  --danger: #e06c75;
-  --radius: 14px;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #eef1f4;
+  --line: #e4e8ec;
+  --text: #14181c;
+  --muted: #6a7783;
+  --accent: #12805c;
+  --accent-soft: #e6f4ee;
+  --warn: #9a6212;
+  --warn-soft: #fdf3e3;
+  --danger: #b3261e;
+  --radius: 18px;
   --pad: 16px;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
-@media (prefers-color-scheme: light) {
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #f6f7f9; --surface: #fff; --surface-2: #eef1f4; --line: #dde2e8;
-    --text: #161b20; --muted: #64707c; --accent: #12805c; --warn: #9a6212;
-    --danger: #b3261e;
+    --bg: #101316; --surface: #191d21; --surface-2: #21262b; --line: #2b3138;
+    --text: #e8edf2; --muted: #8d9aa6; --accent: #5ec8a0; --accent-soft: #16302a;
+    --warn: #e0a458; --warn-soft: #2a2113; --danger: #e06c75;
   }
 }
 
@@ -35,7 +40,7 @@ body {
 #app { max-width: 640px; margin: 0 auto; padding: var(--pad) var(--pad) 96px; }
 
 h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: .01em; }
-h2 { font-size: .78rem; font-weight: 600; text-transform: uppercase;
+h2 { font-size: .74rem; font-weight: 600; text-transform: uppercase;
      letter-spacing: .09em; color: var(--muted); margin: 28px 0 10px; }
 
 header.top {
@@ -57,7 +62,8 @@ nav.tabs .badge {
 
 .card {
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 14px; margin-bottom: 10px;
+  border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(16, 24, 32, .04);
 }
 
 /* ---- the mic ---- */
@@ -77,16 +83,49 @@ button.mic:disabled { background: var(--surface-2); color: var(--muted); cursor:
 
 .heard { min-height: 1.3em; color: var(--muted); font-size: .9rem; text-align: center; }
 
-/* ---- totals ---- */
+/* ---- intake header ---- */
+.intake { padding: 18px; }
+.intake-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.intake .label {
+  font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+}
+.intake-value { font-size: 2.4rem; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.intake .err { font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.macro-grid { display: grid; grid-template-columns: repeat(3, minmax(52px, 1fr)); gap: 8px; }
+.macro { background: var(--surface-2); border-radius: 12px; padding: 8px 10px; text-align: center; }
+.macro-name { font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.macro-value { font-size: .92rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* legacy stat tiles, still used on Diagnostics */
 .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
-.stat { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.stat { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
 .stat .label { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
 .stat .value { font-size: 1.35rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .stat .err { font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-.incomplete {
-  border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent);
-  padding: 10px 12px; border-radius: 8px; font-size: .84rem; color: var(--text); margin-top: 10px;
+/* ---- meal sections ---- */
+.meal { padding: 6px 14px 8px; }
+.meal-head { display: flex; align-items: center; gap: 10px; padding: 12px 2px 8px; }
+.meal-name { font-size: 1.02rem; font-weight: 650; }
+.meal-kcal {
+  font-variant-numeric: tabular-nums; font-size: .95rem; font-weight: 600; color: var(--muted);
+}
+button.add {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%;
+  border: none; background: var(--accent); color: #fff;
+  font-size: 1.25rem; line-height: 1; cursor: pointer;
+}
+button.add:active { transform: scale(.94); }
+.empty.quiet { padding: 10px 4px 12px; text-align: left; font-size: .84rem; }
+.meal-note {
+  font-size: .76rem; color: var(--warn); background: var(--warn-soft);
+  border-radius: 10px; padding: 7px 10px; margin: 4px 0 8px;
+}
+.slot-target {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--accent-soft); color: var(--accent); border-radius: 10px;
+  padding: 7px 8px 7px 12px; margin-bottom: 10px; font-size: .82rem; font-weight: 600;
 }
 
 /* ---- lists ---- */

@@ -12,6 +12,8 @@ const root = document.getElementById('app')!;
 const mic = new Mic();
 let store: Store;
 let tab: Tab = 'today';
+/** Set by a meal section's + button; cleared after the next capture. */
+let pendingSlot: string | null = null;
 
 void boot();
 
@@ -31,7 +33,15 @@ async function boot(): Promise<void> {
 
 function render(): void {
   const snap = store.snapshot;
-  const ctx = { store, snap, rerender: render };
+  const ctx = {
+    store, snap, rerender: render,
+    onAddTo: (slot: string | null) => {
+      pendingSlot = slot;
+      render();
+      document.querySelector<HTMLElement>('.mic-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.querySelector<HTMLInputElement>('.capture input[type=text]')?.focus();
+    },
+  };
   clear(root);
 
   root.append(
@@ -110,9 +120,17 @@ function micPanel(): HTMLElement {
     void commit(text, now, now, null);
   });
 
-  return h('div', {},
-    h('div', { class: 'mic-wrap' }, button, heard),
-    h('div', { class: 'card' }, typed));
+  const capture = h('div', { class: 'card capture' }, typed);
+  if (pendingSlot) {
+    capture.prepend(h('div', { class: 'slot-target' },
+      h('span', { text: `logging to ${pendingSlot}` }),
+      h('button', {
+        class: 'btn quiet', text: 'clear',
+        onclick: () => { pendingSlot = null; render(); },
+      })));
+  }
+
+  return h('div', {}, h('div', { class: 'mic-wrap' }, button, heard), capture);
 }
 
 /**
@@ -125,11 +143,12 @@ async function commit(
 ): Promise<void> {
   let out: Awaited<ReturnType<Store['log']>>;
   try {
-    out = await store.log(transcript, { micTap, sttReturned, confidence });
+    out = await store.log(transcript, { micTap, sttReturned, confidence, mealSlot: pendingSlot });
   } catch (e) {
     toast((e as Error).message, { tone: 'error' });
     return;
   }
+  pendingSlot = null;
   render();
 
   const logged = out.items.filter((i) => i.action === 'logged');

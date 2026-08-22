@@ -34,12 +34,37 @@ Four tabs. The UI is intentionally close to nothing.
 
 | Tab | Contains |
 |---|---|
-| **Today** | mic button, typed fallback, day totals with error bars, the day's entries |
+| **Today** | mic button, typed fallback, day totals with error bars, and the day's entries **grouped by meal** |
 | **Queue** | entries needing an amount; phrases not recognised. Badge = combined count |
 | **Measures** | your household measures and what each weighs |
 | **Diagnostics** | acceptance criteria measured, thresholds, data import, backup |
 
 ![Today](screens/today.png)
+
+### The day, by meal
+
+Entries are grouped into Breakfast / Lunch / Snack / Dinner, and each
+section carries a **+** that files the next entry there regardless of the
+clock — logging breakfast at three in the afternoon because you forgot is
+a normal thing to do.
+
+Those sections are **your** windows, clustered from when you actually log:
+first from imported history, and failing that from your own entries once
+there are at least eight. Below that threshold the app shows one
+undifferentiated list, because a handful of entries describes a habit no
+better than a coin describes a distribution. Each header shows the derived
+centre ("usually 08:15") so it is obvious the times came from you.
+
+Two things a commercial tracker puts here that this one deliberately does
+not:
+
+- **No per-meal calorie target.** No "0 of 612 Cal". A target is a
+  decision made for you, and it is out of scope until there is a
+  calibrated model to derive one from. Each section shows what you *ate*,
+  not what you are *allowed*.
+- **No prompts to eat.** No "Don't miss lunch". An empty section says
+  "nothing yet" and stops there. The brief's eighth principle is
+  *never nag*.
 
 ---
 
