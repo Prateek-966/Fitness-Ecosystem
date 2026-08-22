@@ -32,13 +32,14 @@ server {
                       application/json application/manifest+json
                       image/svg+xml application/wasm;
 
-    # nginx 1.27 knows application/wasm, but WebAssembly streaming
-    # instantiation rejects any other type, so be explicit.
-    types {
-        application/wasm            wasm;
-        application/manifest+json   webmanifest;
-    }
-    include /etc/nginx/mime.types;
+    # MIME types are inherited from the stock nginx.conf's http-level
+    # `include mime.types`, which has known application/wasm since 1.16.
+    # Deliberately NO `types` block here: one in server context REPLACES
+    # the inherited table instead of extending it, and this image cannot
+    # be built in the development environment, so the config leans on
+    # stock behaviour wherever a custom line is not clearly earning risk.
+    # (.webmanifest may serve as octet-stream; browsers process manifests
+    # by request destination, not Content-Type, so installs still work.)
 
     add_header Cache-Control           $app_cache_control always;
     add_header X-Content-Type-Options  "nosniff"          always;
