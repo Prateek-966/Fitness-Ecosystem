@@ -131,6 +131,13 @@ export interface Diagnostics {
   p90CaptureMs: number | null;
   underTargetFraction: number | null;
   fastpathFraction: number | null;
+  /** Utterances sitting visibly in the queue. Not a failure — a to-do. */
+  queuedUtterances: number;
+  /**
+   * Utterances marked done with nothing to show for them: no entries, no
+   * undo, no queue position. This is the number criterion 3 is actually
+   * about, and it must always be zero.
+   */
   lostUtterances: number;
   openPending: number;
   currentStreakDays: number;
@@ -161,7 +168,13 @@ export function diagnostics(db: Db, windowDays = 14): Diagnostics {
     [since],
   );
 
-  const lost = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM v_orphan_utterance')!;
+  const queued = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM v_orphan_utterance')!;
+  const lost = db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM utterance u
+     WHERE u.processed_at IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM log_entry le WHERE le.utterance_id = u.id)
+       AND NOT EXISTS (SELECT 1 FROM undone_utterance x WHERE x.utterance_id = u.id)`,
+  )!;
   const openPending = db.get<{ n: number }>(
     "SELECT COUNT(*) AS n FROM log_entry WHERE status <> 'resolved'",
   )!;
@@ -174,6 +187,7 @@ export function diagnostics(db: Db, windowDays = 14): Diagnostics {
       ? timings.filter((t) => t <= targetMs).length / timings.length
       : null,
     fastpathFraction: fast && fast.total > 0 ? fast.fast / fast.total : null,
+    queuedUtterances: queued.n,
     lostUtterances: lost.n,
     openPending: openPending.n,
     currentStreakDays: loggingStreak(db),

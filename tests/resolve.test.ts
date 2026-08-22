@@ -375,3 +375,33 @@ describe('provenance', () => {
     ).toThrow();
   });
 });
+
+// -----------------------------------------------------------------
+// The invariant behind criterion 3, stated as a query.
+// -----------------------------------------------------------------
+describe('every utterance has exactly one outcome', () => {
+  const outcomes = () => db.all<{ id: number; kind: string }>(
+    `SELECT u.id,
+            CASE
+              WHEN EXISTS (SELECT 1 FROM undone_utterance x WHERE x.utterance_id = u.id) THEN 'undone'
+              WHEN EXISTS (SELECT 1 FROM log_entry le WHERE le.utterance_id = u.id)      THEN 'logged'
+              WHEN u.processed_at IS NULL                                                THEN 'queued'
+              ELSE 'LOST'
+            END AS kind
+     FROM utterance u`,
+  );
+
+  it('never produces a LOST outcome across the whole range of inputs', () => {
+    say('two rotis');                                   // fast path
+    say('rajma');                                       // pending quantity
+    say('one katori pumpkin flower sabzi');             // slow path
+    say('two rotis and one katori pumpkin flower sabzi'); // mixed
+    say('mmm');                                         // parses to nothing
+    say('...');                                         // parses to nothing
+    undoUtterance(db, say('two rotis').utteranceId);    // undone
+
+    const kinds = outcomes();
+    expect(kinds).toHaveLength(7);
+    expect(kinds.filter((k) => k.kind === 'LOST')).toEqual([]);
+  });
+});

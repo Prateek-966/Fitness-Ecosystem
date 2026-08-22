@@ -1,1 +1,238 @@
-# Fitness-Ecosystem
+# Nutrition log — v0
+
+Speak a meal, it's logged. The app learns your food vocabulary, resolves
+household measures against your own calibration, and reports an intake
+index with an honest error bar instead of a confident calorie count.
+
+Built to the spec in [`docs/BUILD_BRIEF.md`](docs/BUILD_BRIEF.md). The
+single hypothesis under test: **can a meal be logged by voice faster than
+it can be typed, and will that keep happening for 30 days?**
+
+| Today | Queue | Diagnostics |
+|---|---|---|
+| ![Today](docs/screens/today.png) | ![Queue](docs/screens/queue.png) | ![Diagnostics](docs/screens/diagnostics.png) |
+
+---
+
+## Running it
+
+```sh
+npm install
+npm run dev            # http://localhost:5173
+npm run build          # typecheck + production build
+npm test               # 93 unit tests
+npm run test:browser   # 11 end-to-end checks in Chromium, incl. OPFS persistence
+```
+
+Then, in the app under **Diagnostics**:
+
+1. Load a food CSV (see *Food data* below). Nothing ships with the app.
+2. Optionally import a Healthify export.
+3. Under **Measures**, weigh one katori, one piece, one glass. Once.
+
+Add it to your phone's home screen and it runs standalone.
+
+### CLI
+
+```sh
+npm run load-indb -- data/indb.csv                  # food reference data
+npm run load-indb -- data/labels.csv --source label # anything with its own provenance
+npm run import-healthify -- exports/healthify.csv   # names, portions, timestamps only
+npm run nightly                                     # recompute daily_logging_stats
+npm run diagnostics                                 # acceptance criteria, measured
+```
+
+The CLI writes to `data/nutrition.sqlite3` (gitignored). Override with
+`LOG_DB=path`.
+
+---
+
+## Stack, and why
+
+A **mobile PWA**: Web Speech API for STT, SQLite compiled to WASM with
+OPFS persistence, plain TypeScript, no framework. This is what the brief
+recommended and nothing came up to justify deviating — it tests the
+hypothesis in days and installs to a phone with no store listing.
+
+**SQLite runs in a dedicated worker.** This is the one structural thing
+that isn't obvious from the brief, and it isn't a preference. OPFS
+*synchronous access handles* — the only way to get durable local SQLite
+without asking the host to send COOP/COEP headers — do not exist on the
+main thread in any current browser. A main-thread database opens fine,
+logs fine, and then loses the day on reload. Everything in `src/core/`
+stays synchronous inside that worker, so the capture write still never
+yields; only the UI's view of it is a promise.
+
+If Web Speech latency proves unacceptable on Android, the fallback named
+in the brief is React Native + Expo with on-device recognition. Nothing
+outside `src/app/speech.ts` would change: the core takes a string.
+
+```
+src/core/       pure logic, no DOM, no browser — this is what the tests cover
+src/platform/   two Db implementations: node:sqlite (tests, CLI), sqlite-wasm (app)
+src/worker/     the database worker — owns the connection, runs the core
+src/app/        UI: async proxy to the worker, views, mic, toast
+db/             schema.sql (given, plus additive v0 tables) and seed.sql
+```
+
+---
+
+## What v0 does
+
+- [x] Voice capture → on-device STT → raw utterance persisted before anything else
+- [x] Deterministic local parser — **no model call on the fast path**
+- [x] Fuzzy match against `phrase_index`, your own index
+- [x] Fast path: match → grams → write → toast. No confirmation screen
+- [x] Slow path: unmatched food → resolve by hand → written back, fast forever after
+- [x] Pending-quantity queue, clearable in one pass
+- [x] Undo toast, 5 s, non-blocking
+- [x] Manual edit of any entry, via `log_revision`
+- [x] Unit calibration screen — weigh once, store grams, re-derive past entries
+- [x] Healthify import — names, portions, timestamps; **no calorie figures**
+- [x] Daily totals with error bars combined in quadrature
+- [x] `daily_logging_stats` populated nightly
+- [x] `match_score` logged on every entry from day one, plus a full `match_audit`
+
+**Not built, by design:** Garmin ingestion, the adaptive TDEE model, goals
+and targets, the exercise logger, micronutrient UI, any recommendation
+engine. The schema accommodates all of them — `workout_session`,
+`session_energy` and the precedence view are already there, unused — so
+none of it needs a migration.
+
+---
+
+## The design principles, and where they live in the code
+
+Each of these has tests that fail if it is broken.
+
+**1. Consistency beats accuracy.** Normalisation is stable above all else
+(`normalise` in `parse.ts`); `daily_logging_stats` records *how* each day
+was logged, not just what, so a change of regime is visible before it
+corrupts a regression.
+
+**2. Capture never blocks.** `capture()` writes the utterance outside the
+resolution transaction. A parse failure, a match failure, a thrown error
+downstream — none of them can roll it back.
+
+**3. Ambiguous ≠ incomplete.** An unrecognised food never reaches
+`log_entry`. A recognised food with no quantity does, as
+`pending_quantity`. `parse()` returns *nothing* for "two katoris" — a unit
+with no food is ambiguity, not a gap.
+
+**4. Pending entries are excluded, never zeroed.** `v_daily_totals`
+filters on `status = 'resolved'`, and the UI says the day is incomplete
+rather than showing a number that looks finished.
+
+**5. Every number carries provenance.** No nutrient value appears in any
+source file. Everything comes through `foodimport.ts` from a file you
+supplied, with its `source` and a `rel_error` — 22% for a label, because
+that is what FSSAI tolerance actually permits.
+
+**6. Edits are append-only.** `revise()` writes a `log_revision` row for
+every change. Recalibrating a measure writes one *per affected entry*.
+
+**7. Household measures resolve against your calibration.** `toGrams()`
+prefers a food-specific measure, then a general one, and returns `null`
+rather than inventing grams for a measure you have never weighed.
+
+**8. Default permissive, surface consequences, never block.** Every
+threshold is editable in the app. Nothing is locked, nothing nags.
+
+**9. Store every estimate, sum none of them.** `session_energy` holds one
+row per source; `v_session_energy` emits exactly one row per session.
+Double-counting is structurally impossible, not merely discouraged.
+
+---
+
+## Three decisions worth your sign-off
+
+The brief says not to "improve" the design without asking. These are the
+three places I made a call. All three are reversible; two are settings.
+
+**1. Auto-learn is gated above the match threshold.**
+The reference `resolve.py` writes back to `phrase_index` on every accepted
+match, including a fuzzy one that just cleared 0.82. That makes a marginal
+match permanent: next time it is an *exact* hit at score 1.0, and the
+false positive compounds silently — the exact failure mode the brief says
+you will never catch. So there are now two thresholds:
+`fuzzy_threshold` (0.82) decides whether to log it, `auto_learn_threshold`
+(0.93) decides whether to *remember* it. Below the second, the entry lands
+and shows a `~0.86` pill in the day list, and the decision is in
+`v_match_review` for you to accept or not. Set `auto_learn_threshold` to
+`fuzzy_threshold` to get the original behaviour.
+
+**2. A fuzzy win must beat its runner-up by a margin** (`min_match_margin`,
+0.05). "paneer bhurjee" scoring 0.88 against *both* "paneer bhurji" and
+"paneer burji" is a coin flip wearing a confident number. Set to 0 to
+disable.
+
+**3. Imported Healthify rows never become `log_entry` rows.**
+They land in `imported_entry`, which has no nutrient column at all. The
+brief says the history is "for pattern seeding, not for numbers", and this
+is the most literal reading: the history seeds `phrase_index` candidates
+and derives your meal-slot windows, and nothing else. If you would rather
+have the six months in the log itself, that is a different call and it
+changes what days are model-eligible.
+
+Also worth flagging: `phraseCandidates()` **suggests** but never binds.
+Attaching a name from someone else's database to a food is a food-identity
+decision, and those are never made automatically.
+
+---
+
+## Fixes to the reference implementation
+
+Found while porting `resolve.py` and covered by tests:
+
+- **`UNIQUE (food_id, unit_id)` cannot dedupe the general calibration.**
+  SQLite treats NULLs as distinct inside a UNIQUE constraint, so
+  recalibrating "a katori" appended a second row and every lookup kept
+  returning the stale grams — a household measure that silently refuses to
+  move. Fixed with a partial unique index on `unit_id WHERE food_id IS NULL`.
+- **`revise()` tripped its own CHECK constraint.** Clearing a quantity on a
+  row still marked `resolved` violates the resolved-rows-are-complete
+  invariant mid-statement, even though the end state is legal. It now drops
+  to pending first.
+- **An utterance that parsed to nothing was marked processed.** `"mmm"`
+  set `processed_at` with no entries and no queue position — a silently
+  lost log, against acceptance criterion 3. `processed_at` is now set only
+  when every parsed item landed.
+- **`revise()` interpolated the field name into SQL.** Now whitelisted.
+- **`-is$` ate the plurals that matter most.** A guard meant for "basis"
+  was turning "rotis" into "rotis" instead of "roti" — the very first
+  phrase the brief names. Now an explicit list.
+- **Meal-slot k-means merged a real snack into lunch and split dinner.**
+  Quantile seeding puts two centres inside whichever occasion you log most.
+  Replaced with exact 1-D dynamic programming, which is cheap at this size
+  and gives the same windows for the same data every time.
+
+---
+
+## Food data
+
+**None ships with this repository, and `data/` is gitignored.**
+
+- **INDB** (Indian Nutrient Databank) is the intended primary source: open
+  access, ~1,095 items plus ~1,014 recipes with ingredient decomposition.
+- **IFCT 2017** is reference only. It is personal-use licensed — load it
+  locally if you want it, but nothing derived from it may be committed.
+
+The loader takes any CSV with a food-name column and at least one
+recognised nutrient column, and records which source you told it the file
+came from. A blank cell is treated as missing, never as zero.
+
+---
+
+## Tuning
+
+`FUZZY_THRESHOLD` was a placeholder in the brief and it still is. It lives
+in `app_setting`, editable in the app, because a placeholder you have to
+redeploy to change never gets tuned.
+
+When there is real data, `v_match_review` orders every fuzzy decision by
+how close it came to the threshold — accepted and rejected both, with the
+runner-up it beat and by how much. Tune from that, not from vibes.
+
+`fuzzy_lookup` is a full scan with a difflib-compatible ratio. Fine at a
+few hundred phrases. `bestMatch()` in `similarity.ts` is the interface to
+keep when it stops being fine.

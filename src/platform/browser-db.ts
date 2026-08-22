@@ -9,6 +9,11 @@ import type { Db, Param, Row } from '../core/db';
  * installed to a phone home screen without a store listing. That is the
  * whole reason the stack was chosen — time to first real log.
  *
+ * This module only ever runs inside the database worker. OPFS synchronous
+ * access handles do not exist on the main thread in any current browser,
+ * so a main-thread SQLite gets no persistence at all — the app would run
+ * fine and then lose the day on reload.
+ *
  * Every method is synchronous. The capture write must not yield.
  */
 
@@ -26,7 +31,10 @@ export async function openDatabase(filename = 'nutrition.sqlite3'): Promise<Open
   if (!poolUtil) {
     try {
       poolUtil = await sqlite3.installOpfsSAHPoolVfs({ name: 'nutrition-opfs' });
-    } catch {
+    } catch (e) {
+      // Worth saying out loud: the app still works, but nothing is being
+      // saved, and the user is told so on the Diagnostics tab.
+      console.warn('OPFS unavailable — running in memory only:', e);
       poolUtil = null;
     }
   }

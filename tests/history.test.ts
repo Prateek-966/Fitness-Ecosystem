@@ -225,6 +225,7 @@ describe('capture timing', () => {
     expect(d.medianCaptureMs).toBe(950);
     expect(d.underTargetFraction).toBe(1);
     expect(d.lostUtterances).toBe(0);
+    expect(d.queuedUtterances).toBe(0);
   });
 });
 

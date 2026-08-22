@@ -14,12 +14,16 @@
     "load-indb": "tsx scripts/load-indb.ts",
     "import-healthify": "tsx scripts/import-healthify.ts",
     "nightly": "tsx scripts/nightly.ts",
-    "diagnostics": "tsx scripts/diagnostics.ts"
+    "diagnostics": "tsx scripts/diagnostics.ts",
+    "test:browser": "vite build && vite preview --port 4173 --strictPort & sleep 3 && node tests/browser/smoke.mjs",
+    "test:all": "vitest run && npm run test:browser"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.50.1-build1"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",

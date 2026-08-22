@@ -25,7 +25,7 @@ function matchingChars(a: string, b: string): number {
 
   while (queue.length) {
     const [alo, ahi, blo, bhi] = queue.pop()!;
-    const [i, j, k] = longestMatch(a, b, b2j, alo, ahi, blo, bhi);
+    const [i, j, k] = longestMatch(a, b2j, alo, ahi, blo, bhi);
     if (k === 0) continue;
     matched += k;
     if (alo < i && blo < j) queue.push([alo, i, blo, j]);
@@ -36,7 +36,7 @@ function matchingChars(a: string, b: string): number {
 
 /** difflib's find_longest_match, same tie-breaking (earliest i, then earliest j). */
 function longestMatch(
-  a: string, b: string, b2j: Map<string, number[]>,
+  a: string, b2j: Map<string, number[]>,
   alo: number, ahi: number, blo: number, bhi: number,
 ): [number, number, number] {
   let besti = alo, bestj = blo, bestsize = 0;
