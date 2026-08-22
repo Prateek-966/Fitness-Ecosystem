@@ -8,6 +8,12 @@ Built to the spec in [`docs/BUILD_BRIEF.md`](docs/BUILD_BRIEF.md). The
 single hypothesis under test: **can a meal be logged by voice faster than
 it can be typed, and will that keep happening for 30 days?**
 
+📚 **[Full documentation](docs/)** —
+[functional spec](docs/FUNCTIONAL_SPEC.md) ·
+[architecture](docs/ARCHITECTURE.md) ·
+[schema](docs/SCHEMA.md) ·
+[technical spec](docs/TECHNICAL_SPEC.md)
+
 | Today | Queue | Diagnostics |
 |---|---|---|
 | ![Today](docs/screens/today.png) | ![Queue](docs/screens/queue.png) | ![Diagnostics](docs/screens/diagnostics.png) |
