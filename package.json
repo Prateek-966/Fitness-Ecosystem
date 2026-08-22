@@ -1,0 +1,29 @@
+{
+  "name": "nutrition-log",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal nutrition log. Voice in, personal index, calibrated intake.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "load-indb": "tsx scripts/load-indb.ts",
+    "import-healthify": "tsx scripts/import-healthify.ts",
+    "nightly": "tsx scripts/nightly.ts",
+    "diagnostics": "tsx scripts/diagnostics.ts"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.50.1-build1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1",
+    "vitest": "^2.1.8"
+  }
+}

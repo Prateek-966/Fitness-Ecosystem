@@ -1,0 +1,18 @@
+node_modules/
+dist/
+dev-dist/
+*.local
+
+# Food reference data is NOT committed.
+#
+# IFCT 2017 is personal-use licensed — its derived values must never end
+# up in a repository. INDB is open access but is still upstream data with
+# its own provenance; it is loaded by script, not vendored.
+data/
+*.sqlite3
+*.sqlite3-journal
+*.db
+
+# Healthify exports are personal data.
+exports/
+*.healthify.csv
