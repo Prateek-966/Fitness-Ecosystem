@@ -41,7 +41,7 @@ function render(): void {
         class: 'date',
         text: new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }),
       })),
-    tabs(snap.pending.length + snap.orphans.length),
+    tabs(snap.pending.length + snap.orphanItems.length),
   );
 
   if (tab === 'today') root.append(micPanel(), todayView(ctx));

@@ -8,12 +8,12 @@ import {
 } from '../core/resolve';
 import { recordTiming } from '../core/timing';
 import { diagnostics, refreshAllStats } from '../core/stats';
-import { dayEntries, dayTotals, orphanUtterances, pendingQueue } from '../core/totals';
+import { dayEntries, dayTotals, orphanItems, pendingQueue } from '../core/totals';
 import { refreshWindows, slotFor } from '../core/mealslot';
 import { allSettings, setSetting } from '../core/settings';
 import { importHealthify, parseHealthifyCsv } from '../core/healthify';
 import { loadFoods, parseFoodCsv } from '../core/foodimport';
-import { absNow } from '../core/clock';
+import { absNow, localDate } from '../core/clock';
 import type { Envelope, Reply, Request, Snapshot } from '../app/protocol';
 
 /**
@@ -34,13 +34,13 @@ let db: Db;
 let persistent = false;
 
 function snapshot(): Snapshot {
-  const date = new Date().toLocaleDateString('en-CA');
+  const date = localDate();
   return {
     date,
     totals: dayTotals(db, date),
     entries: dayEntries(db, date),
     pending: pendingQueue(db),
-    orphans: orphanUtterances(db),
+    orphanItems: orphanItems(db),
     units: db.all(
       `SELECT u.id, u.code, u.is_absolute,
               (SELECT grams FROM user_measure m
@@ -134,12 +134,16 @@ async function handle(req: Request): Promise<unknown> {
       setSetting(db, req.key, req.value);
       return snapshot();
 
-    case 'searchFoods':
+    case 'searchFoods': {
+      // % and _ are LIKE wildcards; a search for "100_ juice" should match
+      // literally, not as a pattern.
+      const q = req.q.replace(/[\\%_]/g, (c) => `\\${c}`);
       return db.all(
         `SELECT id, name, brand, source FROM food
-         WHERE name LIKE ? ORDER BY LENGTH(name) LIMIT 12`,
-        [`%${req.q}%`],
+         WHERE name LIKE ? ESCAPE '\\' ORDER BY LENGTH(name) LIMIT 12`,
+        [`%${q}%`],
       );
+    }
 
     case 'importFood': {
       const { records, unmapped } = parseFoodCsv(req.csv);

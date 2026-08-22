@@ -20,8 +20,8 @@ it can be typed, and will that keep happening for 30 days?**
 npm install
 npm run dev            # http://localhost:5173
 npm run build          # typecheck + production build
-npm test               # 93 unit tests
-npm run test:browser   # 11 end-to-end checks in Chromium, incl. OPFS persistence
+npm test               # unit tests, run under both UTC and IST
+npm run test:browser   # end-to-end checks in Chromium, incl. OPFS persistence and CSP
 ```
 
 Then, in the app under **Diagnostics**:
@@ -205,6 +205,48 @@ Found while porting `resolve.py` and covered by tests:
   Quantile seeding puts two centres inside whichever occasion you log most.
   Replaced with exact 1-D dynamic programming, which is cheap at this size
   and gives the same windows for the same data every time.
+
+Found in a second review pass, also tested:
+
+- **Timestamps were stored as UTC.** The schema says "ISO8601, device
+  local" and every downstream consumer — `date(eaten_at)` day grouping,
+  the streak count, meal-slot windows — assumes it. Stored as UTC, an IST
+  dinner logged at 00:30 landed on yesterday. Everything now goes through
+  `localIso()`, and the test suite runs twice (`TZ=UTC` and
+  `TZ=Asia/Kolkata`) with an explicit midnight-boundary regression test.
+- **Completing an entry erased how it was matched.** Supplying a missing
+  amount rewrote `match_method` to `'manual'`, so a fast-path entry
+  stopped counting toward `fastpath_fraction` — quietly corrupting
+  acceptance criterion 2. Only a food-identity change is a re-match now.
+- **`weighed_fraction` double-counted entries.** A LEFT JOIN onto
+  `user_measure` fans out when a unit has both a general and a
+  food-specific calibration; the fraction now reads the basis of the one
+  measure that actually resolved the entry.
+- **Re-importing a Healthify export duplicated portion-less rows.** The
+  same NULLs-are-distinct trap as the calibration table, one table over.
+  Deduped through a `COALESCE` expression index (applied as a migration in
+  `seed.sql`, which runs on every open).
+- **A two-item slow-path utterance could only ever resolve its first
+  item.** The queue is now one row per unmatched *phrase*, and the
+  utterance closes only when the last phrase is settled.
+- **Re-teaching a phrase kept the old food.** `learn()`'s upsert ignored
+  the caller's food on conflict, so a manual correction was silently
+  discarded and the index repeated the mistake forever.
+
+### Security hardening
+
+- `npm audit` clean (vitest 2→4 removed a critical advisory chain).
+- A build-time CSP (`default-src 'self'`, no inline script or style) on a
+  page that holds months of personal health data — defence in depth; the
+  code has no HTML-injection sinks and makes no cross-origin requests.
+- The service worker is network-first for navigations: the old cache-first
+  shell could never deliver an update after a redeploy.
+- `%`/`_` are escaped in food search, so LIKE input is literal.
+- Malformed dates in a Healthify export are skipped, never guessed onto a
+  day — day boundaries are model input.
+- **Export backup** (Diagnostics) downloads the whole database as one
+  `.sqlite3` file; OPFS lives in a single browser profile, and months of
+  logs with no copy anywhere else would be its own data-loss bug.
 
 ---
 

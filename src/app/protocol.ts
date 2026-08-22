@@ -1,5 +1,5 @@
 import type { Diagnostics } from '../core/stats';
-import type { DayEntry, DayTotals, PendingItem } from '../core/totals';
+import type { DayEntry, DayTotals, OrphanItem, PendingItem } from '../core/totals';
 import type { SettingKey } from '../core/settings';
 import type { FoodSource } from '../core/foodimport';
 import type { UtteranceOutcome } from '../core/resolve';
@@ -17,7 +17,7 @@ export interface Snapshot {
   totals: DayTotals;
   entries: DayEntry[];
   pending: PendingItem[];
-  orphans: Array<{ id: number; spoken_at: string; raw_text: string; entries: number }>;
+  orphanItems: OrphanItem[];
   units: Array<{ id: number; code: string; is_absolute: number; grams: number | null }>;
   diagnostics: Diagnostics;
   settings: Record<SettingKey, number>;

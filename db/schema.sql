@@ -321,6 +321,13 @@ CREATE TABLE capture_timing (
 CREATE UNIQUE INDEX ux_user_measure_general
     ON user_measure (unit_id) WHERE food_id IS NULL;
 
+-- food's own UNIQUE has the same NULL blind spot for brand and source_ref.
+-- The loader dedupes with IS-comparisons before inserting, so this index
+-- is a backstop, not the mechanism — but a duplicated food is a wandering
+-- resolution target, which is the one thing the whole design cannot absorb.
+CREATE UNIQUE INDEX ux_food_identity
+    ON food (name, COALESCE(brand, ''), source, COALESCE(source_ref, ''));
+
 
 -- ------------------------------------------------------------
 -- 11. SETTINGS
@@ -353,11 +360,17 @@ CREATE TABLE imported_entry (
     food_text       TEXT    NOT NULL,      -- exactly as their export wrote it
     portion_text    TEXT,                  -- exactly as their export wrote it
     meal_label      TEXT,                  -- their slot name, if present
-    imported_at     TEXT    NOT NULL,
-    UNIQUE (source, eaten_at, food_text, portion_text)
+    imported_at     TEXT    NOT NULL
 );
 
 CREATE INDEX idx_imported_eaten ON imported_entry (eaten_at);
+
+-- Import idempotency. A plain UNIQUE over these columns does not survive
+-- a NULL portion_text — SQLite treats NULLs as distinct inside UNIQUE —
+-- so re-importing the same export would duplicate every row that has no
+-- portion. Same lesson user_measure taught: dedupe through an expression.
+CREATE UNIQUE INDEX ux_imported_entry
+    ON imported_entry (source, eaten_at, food_text, COALESCE(portion_text, ''));
 
 
 -- ------------------------------------------------------------

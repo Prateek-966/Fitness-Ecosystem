@@ -1,16 +1,23 @@
 /*
- * App-shell cache. Offline is a bonus here, not a requirement: the
- * database is local, so the log works with no network either way. What
- * this buys is a cold start that does not wait on a round trip.
+ * App-shell service worker.
  *
- * Speech recognition itself may still need the network depending on the
- * browser — that is a known limit of the Web Speech API, and the reason
- * the brief names React Native with on-device STT as the fallback.
+ * Offline is a bonus here, not a requirement — the database is local, so
+ * the log works without a network either way. What this buys is a cold
+ * start that does not wait on a round trip.
+ *
+ * Strategy matters more than it looks:
+ *  - navigations are NETWORK-FIRST. A cache-first shell pins the old
+ *    index.html — which references old hashed assets — forever, so the
+ *    app would simply never update after a redeploy.
+ *  - /assets/ is CACHE-FIRST. Vite content-hashes those filenames, so a
+ *    cached copy is immutable by construction.
+ *  - everything else same-origin is network-first with cache fallback.
  */
-const CACHE = 'log-shell-v1';
+const CACHE = 'log-shell-v2';
+const PRECACHE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/manifest.webmanifest'])));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
   self.skipWaiting();
 });
 
@@ -22,16 +29,33 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+const put = (req, res) => {
+  const copy = res.clone();
+  caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+  return res;
+};
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
 
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).then((res) => put(e.request, res))
+        .catch(() => caches.match(e.request).then((hit) => hit ?? caches.match('/index.html'))),
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith('/assets/')) {
+    e.respondWith(
+      caches.match(e.request).then((hit) => hit ?? fetch(e.request).then((res) => put(e.request, res))),
+    );
+    return;
+  }
+
   e.respondWith(
-    caches.match(e.request).then((hit) =>
-      hit ?? fetch(e.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-        return res;
-      }).catch(() => caches.match('/index.html'))),
+    fetch(e.request).then((res) => put(e.request, res))
+      .catch(() => caches.match(e.request)),
   );
 });

@@ -1,4 +1,5 @@
 import type { Db } from './db';
+import { localIso } from './clock';
 
 /**
  * Meal slots are DERIVED, never hard-coded.
@@ -154,7 +155,7 @@ export function refreshWindows(
   const windows = deriveWindows(rows.map((r) => r.t));
   if (windows.length === 0) return [];
 
-  const now = new Date().toISOString();
+  const now = localIso();
   db.tx(() => {
     db.run('DELETE FROM meal_slot_window');
     for (const w of windows) {

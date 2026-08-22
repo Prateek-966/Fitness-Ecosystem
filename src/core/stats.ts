@@ -1,4 +1,5 @@
 import type { Db } from './db';
+import { localDate } from './clock';
 
 /**
  * daily_logging_stats — the bias-drift detector.
@@ -39,15 +40,21 @@ export function computeDayStats(db: Db, date: string): DayStats {
   // Share of resolved entries whose grams came from a measure the user
   // actually put on a scale, rather than one they estimated or an
   // absolute unit they spoke directly.
+  // The basis of the measure that actually resolved the entry — the same
+  // precedence toGrams uses (food-specific first, then latest). A LEFT
+  // JOIN here would fan out when both a general and a food-specific
+  // calibration exist for one unit, counting a single entry twice in both
+  // numerator and denominator and quietly skewing the fraction.
   const weighed = db.get<{ weighed: number; total: number }>(
-    `SELECT SUM(CASE WHEN um.basis = 'weighed' OR u.is_absolute = 1
-                     THEN 1 ELSE 0 END)  AS weighed,
-            COUNT(*)                     AS total
+    `SELECT SUM(CASE WHEN u.is_absolute = 1 OR (
+              SELECT um.basis FROM user_measure um
+              WHERE um.unit_id = le.unit_id
+                AND (um.food_id = le.food_id OR um.food_id IS NULL)
+              ORDER BY um.food_id IS NULL, um.calibrated_at DESC LIMIT 1
+            ) = 'weighed' THEN 1 ELSE 0 END) AS weighed,
+            COUNT(*)                         AS total
      FROM log_entry le
      JOIN unit u ON u.id = le.unit_id
-     LEFT JOIN user_measure um
-            ON um.unit_id = le.unit_id
-           AND (um.food_id = le.food_id OR um.food_id IS NULL)
      WHERE date(le.eaten_at) = ? AND le.status = 'resolved'`,
     [date],
   );
@@ -144,7 +151,7 @@ export interface Diagnostics {
 }
 
 export function diagnostics(db: Db, windowDays = 14): Diagnostics {
-  const since = new Date(Date.now() - windowDays * 86400_000).toISOString().slice(0, 10);
+  const since = localDate(new Date(Date.now() - windowDays * 86400_000));
   const target = db.get<{ value: string }>(
     "SELECT value FROM app_setting WHERE key = 'target_capture_ms'",
   );
@@ -202,11 +209,13 @@ export function loggingStreak(db: Db): number {
   if (days.size === 0) return 0;
   let streak = 0;
   const cursor = new Date();
-  // Today not being logged yet does not break a streak that is still live.
-  if (!days.has(cursor.toISOString().slice(0, 10))) cursor.setUTCDate(cursor.getUTCDate() - 1);
-  while (days.has(cursor.toISOString().slice(0, 10))) {
+  // Local calendar days: a streak is about evenings and mornings as the
+  // user lives them, not as UTC slices them. Today not being logged yet
+  // does not break a streak that is still live.
+  if (!days.has(localDate(cursor))) cursor.setDate(cursor.getDate() - 1);
+  while (days.has(localDate(cursor))) {
     streak++;
-    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    cursor.setDate(cursor.getDate() - 1);
   }
   return streak;
 }

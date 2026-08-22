@@ -169,3 +169,4 @@ label { display: block; font-size: .74rem; color: var(--muted); margin-bottom: 4
 .hint { font-size: .78rem; color: var(--muted); line-height: 1.5; }
 .hint code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
 .mono { font-variant-numeric: tabular-nums; }
+.mt { margin-top: 10px; }

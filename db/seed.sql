@@ -31,3 +31,18 @@ INSERT OR IGNORE INTO app_setting (key, value) VALUES
     ('min_match_margin',      '0.05'),
     ('undo_window_ms',        '5000'),
     ('target_capture_ms',     '3000');
+
+-- ------------------------------------------------------------
+-- Additive migrations. seed.sql runs on every open, so a database
+-- created before these indexes existed picks them up here. The
+-- imported_entry dedupe must run first or the index cannot build
+-- over data the old UNIQUE let through.
+-- ------------------------------------------------------------
+DELETE FROM imported_entry WHERE id NOT IN (
+    SELECT MIN(id) FROM imported_entry
+    GROUP BY source, eaten_at, food_text, COALESCE(portion_text, '')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_imported_entry
+    ON imported_entry (source, eaten_at, food_text, COALESCE(portion_text, ''));
+CREATE UNIQUE INDEX IF NOT EXISTS ux_food_identity
+    ON food (name, COALESCE(brand, ''), source, COALESCE(source_ref, ''));

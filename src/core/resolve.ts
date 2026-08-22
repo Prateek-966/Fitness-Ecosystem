@@ -20,6 +20,7 @@ import type { Db } from './db';
 import { parse, type ParsedItem } from './parse';
 import { bestMatch, type Candidate } from './similarity';
 import { getSetting } from './settings';
+import { localIso } from './clock';
 
 export type MatchMethod = 'exact_index' | 'fuzzy_index' | 'llm_resolved' | 'manual';
 export type PendingReason = 'quantity_missing' | 'unit_missing' | 'unit_uncalibrated';
@@ -55,7 +56,7 @@ export interface CaptureInput {
   audioPath?: string | null;
 }
 
-const nowIso = () => new Date().toISOString();
+const nowIso = () => localIso();
 
 // ------------------------------------------------------------------
 // Step 0 — capture. Never fails, never blocks, never waits on network.
@@ -66,7 +67,7 @@ export function capture(db: Db, input: CaptureInput): number {
     `INSERT INTO utterance (spoken_at, tz_offset_min, raw_text, stt_confidence, audio_path)
      VALUES (?, ?, ?, ?, ?)`,
     [
-      input.spokenAt.toISOString(),
+      localIso(input.spokenAt),
       input.tzOffsetMin,
       input.rawText,
       input.sttConfidence ?? null,
@@ -80,7 +81,18 @@ export function capture(db: Db, input: CaptureInput): number {
 // Step 2 — FAST PATH. Match against YOUR index, not a global database.
 // This is the whole differentiator: it knows what you meant by week two.
 // ------------------------------------------------------------------
-export function fastPath(db: Db, item: ParsedItem): Resolution | null {
+/** What the matcher saw, kept for match_audit whether or not it matched. */
+export interface MatchScan {
+  score: number;
+  chosen: string | null;
+  runnerUp: string | null;
+  runnerUpScore: number | null;
+  threshold: number;
+}
+
+export function matchItem(
+  db: Db, item: ParsedItem,
+): { res: Resolution | null; scan: MatchScan } {
   const threshold = getSetting(db, 'fuzzy_threshold');
   const minMargin = getSetting(db, 'min_match_margin');
 
@@ -97,18 +109,24 @@ export function fastPath(db: Db, item: ParsedItem): Resolution | null {
   let runnerUpScore: number | null = null;
 
   if (!row) {
+    // One scan. Its result serves both the decision and the audit row, so
+    // a slow-path miss costs exactly the same lookup as a fuzzy hit.
     const m = fuzzyLookup(db, item.phrase);
     method = 'fuzzy_index';
     score = m.bestScore;
     runnerUp = m.runnerUp?.key ?? null;
     runnerUpScore = m.runnerUp ? m.runnerUpScore : null;
 
+    const scan: MatchScan = {
+      score, chosen: m.best?.key ?? null, runnerUp, runnerUpScore, threshold,
+    };
+
     const clearWinner =
       m.best !== null &&
       m.bestScore >= threshold &&
       (m.runnerUp === null || m.bestScore - m.runnerUpScore >= minMargin);
 
-    if (!clearWinner) return null;
+    if (!clearWinner) return { res: null, scan };
     row = m.best!.value;
   }
 
@@ -127,15 +145,21 @@ export function fastPath(db: Db, item: ParsedItem): Resolution | null {
     threshold,
   };
 
+  const scan: MatchScan = { score, chosen: row.phrase, runnerUp, runnerUpScore, threshold };
+
   // Food is known. Quantity may not be. That is a pending field, NOT an
   // ambiguity — the entry still lands.
   if (quantity === null) {
-    return { ...base, quantity: null, unitId, needsUser: true, reason: 'quantity_missing' };
+    return { res: { ...base, quantity: null, unitId, needsUser: true, reason: 'quantity_missing' }, scan };
   }
   if (unitId === null || unitId === undefined) {
-    return { ...base, quantity, unitId: null, needsUser: true, reason: 'unit_missing' };
+    return { res: { ...base, quantity, unitId: null, needsUser: true, reason: 'unit_missing' }, scan };
   }
-  return { ...base, quantity, unitId, needsUser: false, reason: null };
+  return { res: { ...base, quantity, unitId, needsUser: false, reason: null }, scan };
+}
+
+export function fastPath(db: Db, item: ParsedItem): Resolution | null {
+  return matchItem(db, item).res;
 }
 
 export function fuzzyLookup(db: Db, phrase: string) {
@@ -211,7 +235,7 @@ export function writeEntry(
         grams_resolved, status, match_method, match_score, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      utteranceId, eatenAt.toISOString(), mealSlot, res.foodId,
+      utteranceId, localIso(eatenAt), mealSlot, res.foodId,
       res.quantity, res.unitId, grams, status,
       res.matchMethod, res.matchScore, nowIso(),
     ],
@@ -243,6 +267,12 @@ export function learn(
      ON CONFLICT(phrase) DO UPDATE SET
        hit_count       = hit_count + 1,
        last_used_at    = excluded.last_used_at,
+       -- The food is taken from the caller, not kept from the row. On the
+       -- fast path they are identical (the food CAME from this row); on a
+       -- manual re-teach the user has just said the old binding was wrong,
+       -- and an index that ignores that correction repeats the mistake
+       -- silently forever.
+       food_id         = excluded.food_id,
        default_qty     = COALESCE(phrase_index.default_qty, excluded.default_qty),
        default_unit_id = COALESCE(phrase_index.default_unit_id, excluded.default_unit_id)`,
     [phrase, foodId, qty, unitId, nowIso()],
@@ -327,9 +357,16 @@ export function revise(
     if (row.quantity !== null && row.unit_id !== null) {
       grams = toGrams(db, row.food_id, row.quantity, row.unit_id);
     }
+    // match_method records how the FOOD IDENTITY was decided, and
+    // fastpath_fraction (acceptance criterion 2) is computed from it.
+    // Supplying an amount to a fast-path entry does not un-match the food,
+    // so only an identity change may overwrite it.
+    if (field === 'food_id') {
+      db.run(`UPDATE log_entry SET match_method = 'manual', match_score = 1.0 WHERE id = ?`,
+             [logEntryId]);
+    }
     db.run(
-      `UPDATE log_entry SET grams_resolved = ?, status = ?, match_method = 'manual'
-       WHERE id = ?`,
+      `UPDATE log_entry SET grams_resolved = ?, status = ? WHERE id = ?`,
       [grams, grams !== null ? 'resolved' : 'pending_quantity', logEntryId],
     );
   });
@@ -464,22 +501,15 @@ export function handleUtterance(
 
   db.tx(() => {
     for (const item of items) {
-      const res = fastPath(db, item);
+      const { res, scan } = matchItem(db, item);
 
       if (res === null) {
         // SLOW PATH. Genuine ambiguity in food identity -> never written
         // to log_entry. Surface it, let the user resolve, then learn() so
-        // it is fast forever after.
-        const m = fuzzyLookup(db, item.phrase);
+        // it is fast forever after. The scan that failed is the audit row.
         auditMatch(db, {
           utteranceId, logEntryId: null, phrase: item.phrase, res: null,
-          fallback: {
-            score: m.bestScore,
-            chosen: m.best?.key ?? null,
-            runnerUp: m.runnerUp?.key ?? null,
-            runnerUpScore: m.runnerUp ? m.runnerUpScore : null,
-            threshold: getSetting(db, 'fuzzy_threshold'),
-          },
+          fallback: scan,
           accepted: false, learned: false,
         });
         outcomes.push({ phrase: item.phrase, rawPhrase: item.rawPhrase, action: 'slow_path' });

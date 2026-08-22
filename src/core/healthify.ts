@@ -1,5 +1,7 @@
 import type { Db } from './db';
 import { normalise, parse } from './parse';
+import { localIso } from './clock';
+import { splitCsv } from './csv';
 
 /**
  * Healthify import — food names, portions-as-written and timestamps ONLY.
@@ -41,7 +43,7 @@ export interface ImportReport {
  * dropped rather than to hope they were absent.
  */
 export function parseHealthifyCsv(csv: string): { rows: HealthifyRow[]; dropped: string[] } {
-  const lines = splitCsvLines(csv).filter((l) => l.some((c) => c.trim() !== ''));
+  const lines = splitCsv(csv).filter((l) => l.some((c) => c.trim() !== ''));
   if (lines.length < 2) return { rows: [], dropped: [] };
 
   const header = lines[0].map((h) => h.trim().toLowerCase());
@@ -92,48 +94,34 @@ function toIso(dateCell = '', timeCell = ''): string | null {
   let iso: string | null = null;
   const dmy = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/.exec(d);
   const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
-  if (ymd) iso = `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
-  else if (dmy) iso = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  const valid = (yy: string, mm: string, dd: string) => {
+    const m = Number(mm), day = Number(dd);
+    return m >= 1 && m <= 12 && day >= 1 && day <= 31 && Number(yy) >= 2000;
+  };
+  if (ymd && valid(ymd[1], ymd[2], ymd[3])) iso = `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+  else if (dmy && valid(dmy[3], dmy[2], dmy[1])) {
+    iso = `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  // A malformed date row is skipped, not guessed: a wrong timestamp lands
+  // the meal on the wrong day, and day boundaries are model input.
   if (!iso) return null;
 
   let time = '00:00:00';
-  const hm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i.exec(t);
+  const hm = /^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?\s*(am|pm)?$/i.exec(t);
   if (hm) {
     let h = parseInt(hm[1], 10);
     const ap = hm[4]?.toLowerCase();
     if (ap === 'pm' && h < 12) h += 12;
     if (ap === 'am' && h === 12) h = 0;
-    time = `${String(h).padStart(2, '0')}:${hm[2]}:${hm[3] ?? '00'}`;
+    if (h <= 23) time = `${String(h).padStart(2, '0')}:${hm[2]}:${hm[3] ?? '00'}`;
   }
   return `${iso}T${time}`;
-}
-
-function splitCsvLines(csv: string): string[][] {
-  const out: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < csv.length; i++) {
-    const c = csv[i];
-    if (quoted) {
-      if (c === '"') {
-        if (csv[i + 1] === '"') { cell += '"'; i++; } else quoted = false;
-      } else cell += c;
-      continue;
-    }
-    if (c === '"') quoted = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
-    else if (c === '\n') { row.push(cell); out.push(row); row = []; cell = ''; }
-    else if (c !== '\r') cell += c;
-  }
-  if (cell !== '' || row.length) { row.push(cell); out.push(row); }
-  return out;
 }
 
 export function importHealthify(db: Db, rows: HealthifyRow[], dropped: string[] = []): ImportReport {
   let inserted = 0;
   let dup = 0;
-  const now = new Date().toISOString();
+  const now = localIso();
 
   db.tx(() => {
     for (const r of rows) {

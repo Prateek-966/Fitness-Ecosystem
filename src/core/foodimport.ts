@@ -1,4 +1,6 @@
 import type { Db } from './db';
+import { localIso } from './clock';
+import { splitCsv } from './csv';
 
 /**
  * Loader for food reference data.
@@ -123,7 +125,7 @@ export function loadFoods(
   db: Db, records: FoodRecord[], source: FoodSource, relError?: number,
 ): LoadReport {
   const err = relError ?? DEFAULT_REL_ERROR[source];
-  const fetched = new Date().toISOString();
+  const fetched = localIso();
   let inserted = 0;
   let updated = 0;
   let nutrientRows = 0;
@@ -169,23 +171,3 @@ export function loadFoods(
   return { inserted, updated, nutrientRows, source, skipped };
 }
 
-function splitCsv(text: string): string[][] {
-  const out: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else quoted = false; }
-      else cell += c;
-      continue;
-    }
-    if (c === '"') quoted = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
-    else if (c === '\n') { row.push(cell); out.push(row); row = []; cell = ''; }
-    else if (c !== '\r') cell += c;
-  }
-  if (cell !== '' || row.length) { row.push(cell); out.push(row); }
-  return out;
-}

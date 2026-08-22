@@ -114,3 +114,47 @@ export function orphanUtterances(db: Db) {
     'SELECT * FROM v_orphan_utterance',
   );
 }
+
+export interface OrphanItem {
+  utteranceId: number;
+  spokenAt: string;
+  rawText: string;
+  /** null = the utterance parsed to nothing; resolve from the raw text. */
+  phrase: string | null;
+}
+
+/**
+ * The slow-path queue, one row per unresolved PHRASE, not per utterance.
+ *
+ * "dal makhani and pumpkin flower sabzi" with both unmatched is two
+ * decisions, and a queue keyed on the utterance could only ever surface
+ * the first — the second stayed invisible until someone noticed the day
+ * looked thin, which is precisely the silent loss this design forbids.
+ */
+export function orphanItems(db: Db): OrphanItem[] {
+  return db.all<any>(
+    `SELECT o.id        AS utteranceId,
+            o.spoken_at AS spokenAt,
+            o.raw_text  AS rawText,
+            ma.phrase   AS phrase
+     FROM v_orphan_utterance o
+     JOIN match_audit ma ON ma.utterance_id = o.id AND ma.accepted = 0
+     WHERE ma.phrase NOT IN (SELECT phrase FROM phrase_index)
+     GROUP BY o.id, ma.phrase
+
+     UNION ALL
+
+     -- Utterances with nothing listable above: parsed to nothing, or every
+     -- miss was since learned through some OTHER utterance without this one
+     -- getting its entry. Either way the person said something and the log
+     -- shows nothing, so a row stays here until they settle it.
+     SELECT o.id, o.spoken_at, o.raw_text, NULL
+     FROM v_orphan_utterance o
+     WHERE NOT EXISTS (
+       SELECT 1 FROM match_audit ma
+       WHERE ma.utterance_id = o.id AND ma.accepted = 0
+         AND ma.phrase NOT IN (SELECT phrase FROM phrase_index)
+     )
+     ORDER BY 2`,
+  );
+}

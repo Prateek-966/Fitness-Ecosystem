@@ -117,6 +117,21 @@ await page.click('nav.tabs button:has-text("Diagnostics")');
 const diag = await page.locator('.card').first().innerText();
 check('capture timing was recorded', /median \d+ ms/.test(diag),
       (diag.match(/median[^\n]*/) ?? [''])[0]);
+
+// --- backup: the whole database leaves as one SQLite file ---
+const [download] = await Promise.all([
+  page.waitForEvent('download', { timeout: 10000 }),
+  page.click('button:has-text("Export backup")'),
+]);
+const dlPath = await download.path();
+const magic = dlPath ? (await import('node:fs')).readFileSync(dlPath).subarray(0, 16).toString('latin1') : '';
+check('backup is a real SQLite database', magic.startsWith('SQLite format 3'),
+      `${download.suggestedFilename()} · "${magic.replace(/\0/g, '')}"`);
+
+// --- CSP made it into the built page ---
+const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
+check('CSP is present in the built page', Boolean(csp && csp.includes("default-src 'self'")),
+      (csp ?? '').slice(0, 60) + '…');
 check('no uncaught page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 
 await browser.close();

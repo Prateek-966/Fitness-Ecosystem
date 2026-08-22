@@ -133,7 +133,7 @@ function unitSelect(ctx: Ctx, selectedCode: string | null): HTMLSelectElement {
 // QUEUE — cleared in one end-of-day pass.
 // ------------------------------------------------------------------
 export function pendingView(ctx: Ctx): HTMLElement {
-  const { pending, orphans } = ctx.snap;
+  const { pending, orphanItems } = ctx.snap;
 
   return h('div', {},
     h('h2', { text: `Needs an amount (${pending.length})` }),
@@ -150,14 +150,19 @@ export function pendingView(ctx: Ctx): HTMLElement {
             }))))
         : h('div', { class: 'empty', text: 'Queue is empty.' })),
 
-    h('h2', { text: `Unresolved utterances (${orphans.length})` }),
+    h('h2', { text: `Not recognised (${orphanItems.length})` }),
     h('div', { class: 'card' },
-      orphans.length
-        ? h('ul', { class: 'list' }, ...orphans.map((o) => h('li', {},
-            h('span', { class: 'time', text: fmt.time(o.spoken_at) }),
+      orphanItems.length
+        ? h('ul', { class: 'list' }, ...orphanItems.map((o) => h('li', {},
+            h('span', { class: 'time', text: fmt.time(o.spokenAt) }),
             h('span', { class: 'grow' },
-              h('div', { class: 'name', text: `“${o.raw_text}”` }),
-              h('div', { class: 'sub', text: 'food not recognised — nothing was guessed' })),
+              h('div', { class: 'name', text: `“${o.phrase ?? o.rawText}”` }),
+              h('div', {
+                class: 'sub',
+                text: o.phrase && o.phrase !== o.rawText.toLowerCase()
+                  ? `from “${o.rawText}” — nothing was guessed`
+                  : 'food not recognised — nothing was guessed',
+              })),
             h('button', { class: 'btn', text: 'Resolve', onclick: () => slowPathSheet(ctx, o) }))))
         : h('div', { class: 'empty', text: 'Nothing unresolved. Every utterance has an outcome.' })),
 
@@ -192,7 +197,7 @@ function quantitySheet(ctx: Ctx, p: Snapshot['pending'][number]): void {
     ]);
 }
 
-function slowPathSheet(ctx: Ctx, o: Snapshot['orphans'][number]): void {
+function slowPathSheet(ctx: Ctx, o: Snapshot['orphanItems'][number]): void {
   const search = h('input', { type: 'search', placeholder: 'search foods…', autofocus: '' });
   const results = h('div', {});
   const qty = h('input', { type: 'number', step: '0.25', min: '0', value: '1' });
@@ -223,7 +228,7 @@ function slowPathSheet(ctx: Ctx, o: Snapshot['orphans'][number]): void {
   };
   search.addEventListener('input', () => void renderResults());
 
-  const close = sheet(`“${o.raw_text}”`, 'not recognised — nothing was written',
+  const close = sheet(`“${o.phrase ?? o.rawText}”`, 'not recognised — nothing was written',
     h('div', {},
       field('What was it?', search), results,
       h('div', { class: 'row' }, field('Amount', qty), field('Unit', unitSel)),
@@ -239,15 +244,17 @@ function slowPathSheet(ctx: Ctx, o: Snapshot['orphans'][number]): void {
           if (!chosen) { toast('Pick a food first.', { tone: 'warn' }); return; }
           close();
           void after(ctx, ctx.store.resolveSlowPath({
-            utteranceId: o.id,
+            utteranceId: o.utteranceId,
             // The key written here MUST be the key the fast path will look
-            // up next time, so it goes through the same normaliser.
-            phrase: indexKey(o.raw_text),
+            // up next time. The parser already produced it for a parsed
+            // item; only a parse-to-nothing utterance falls back to
+            // normalising the raw transcript.
+            phrase: o.phrase ?? indexKey(o.rawText),
             foodId: chosen.id,
             quantity: qty.value === '' ? null : Number(qty.value),
             unitId: Number(unitSel.value),
-            eatenAt: new Date(o.spoken_at),
-          }), `Learned. “${o.raw_text}” is instant from now on.`);
+            eatenAt: new Date(o.spokenAt),
+          }), `Learned. “${o.phrase ?? o.rawText}” is instant from now on.`);
         },
       }),
     ]);
@@ -351,10 +358,32 @@ export function diagnosticsView(ctx: Ctx): HTMLElement {
       criterion(5, '30 consecutive days', `${d.currentStreakDays} day streak`, d.currentStreakDays >= 30))),
 
     h('h2', { text: 'Personal index' }),
-    h('div', { class: 'card' }, h('div', { class: 'totals' },
-      stat('Phrases known', String(ctx.snap.indexSize), 'grows every slow path'),
-      stat('Storage', ctx.snap.persistent ? 'OPFS' : 'memory only',
-           ctx.snap.persistent ? 'survives reload' : 'NOT persisted'))));
+    h('div', { class: 'card' },
+      h('div', { class: 'totals' },
+        stat('Phrases known', String(ctx.snap.indexSize), 'grows every slow path'),
+        stat('Storage', ctx.snap.persistent ? 'OPFS' : 'memory only',
+             ctx.snap.persistent ? 'survives reload' : 'NOT persisted')),
+      h('div', { class: 'row mt' },
+        h('button', {
+          class: 'btn', text: 'Export backup (.sqlite3)',
+          onclick: async () => {
+            // OPFS lives in one browser profile on one device. Months of
+            // logs with no copy anywhere else is its own data-loss bug, so
+            // the whole database exports as a plain SQLite file.
+            try {
+              const bytes = await ctx.store.exportBytes();
+              if (!bytes) { toast('Export not available in this browser.', { tone: 'warn' }); return; }
+              const blob = new Blob([bytes as BlobPart], { type: 'application/vnd.sqlite3' });
+              const a = h('a', {
+                href: URL.createObjectURL(blob),
+                download: `nutrition-${ctx.snap.date}.sqlite3`,
+              });
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+              toast('Backup exported.');
+            } catch (e) { toast((e as Error).message, { tone: 'error' }); }
+          },
+        }))));
 
   if (!ctx.snap.persistent) {
     wrap.append(h('div', { class: 'incomplete' },

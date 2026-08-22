@@ -84,6 +84,18 @@ const LEADING_FILLER = /^(?:of|some|a|an|the|my|and)\s+/;
 
 const SPLIT = /\s*(?:,|;|\band\b|\bwith\b|\bplus\b|\balso\b)\s*/;
 
+/**
+ * Unit patterns, compiled once. Longest spelling first, so "grams" is not
+ * shadowed by "g". The capture path runs this on every utterance; there is
+ * no reason for it to rebuild forty regexes per chunk.
+ */
+const byLength = (a: string, b: string) => b.length - a.length;
+const unitPattern = (word: string) => new RegExp(`^${word}\\b\\s*(?:of\\s+)?`);
+const UNIT_PATTERNS = Object.keys(UNIT_WORDS).sort(byLength)
+  .map((w) => ({ code: UNIT_WORDS[w], re: unitPattern(w) }));
+const GATED_PATTERNS = Object.keys(QUANTITY_GATED_UNITS).sort(byLength)
+  .map((w) => ({ code: QUANTITY_GATED_UNITS[w], re: unitPattern(w) }));
+
 export function parse(rawText: string): ParsedItem[] {
   let text = rawText.toLowerCase();
   for (const [re, sub] of FRACTION_PHRASES) text = text.replace(re, sub);
@@ -121,19 +133,12 @@ function parseChunk(rawChunk: string): ParsedItem | null {
     }
   }
 
-  // Unit: longest match first so "grams" is not shadowed by "g".
-  const candidates = Object.keys(UNIT_WORDS).sort((a, b) => b.length - a.length);
-  if (quantity !== null) {
-    for (const w of Object.keys(QUANTITY_GATED_UNITS).sort((a, b) => b.length - a.length)) {
-      candidates.unshift(w);
-    }
-  }
-
-  for (const word of candidates) {
-    const re = new RegExp(`^${word}\\b\\s*(?:of\\s+)?`);
+  // Quantity-gated spellings ("2 no idli") are only in play after a number.
+  const patterns = quantity !== null ? [...GATED_PATTERNS, ...UNIT_PATTERNS] : UNIT_PATTERNS;
+  for (const { code, re } of patterns) {
     const m = re.exec(chunk);
     if (!m) continue;
-    unitCode = UNIT_WORDS[word] ?? QUANTITY_GATED_UNITS[word];
+    unitCode = code;
     chunk = chunk.slice(m[0].length).trim();
     break;
   }
