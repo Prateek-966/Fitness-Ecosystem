@@ -15,7 +15,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "allowJs": false,
+    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "scripts", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "scripts", "tests", "server/src", "server/tests", "vite.config.ts", "vitest.config.ts"]
 }

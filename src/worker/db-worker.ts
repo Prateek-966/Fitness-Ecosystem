@@ -19,6 +19,9 @@ import {
   mealTargets, saveProfile, setManualTarget, weightProgress, writeTargets,
 } from '../core/energy';
 import { clearPlan, planWeek, writePlan } from '../core/cycling';
+import {
+  hasSyncToken, lastPulledAt, pullFromSync, setSyncToken, syncStatus, triggerSync,
+} from '../core/sync';
 import { absNow, localDate, localIso } from '../core/clock';
 import type { Envelope, Reply, Request, Snapshot } from '../app/protocol';
 
@@ -65,6 +68,14 @@ function snapshot(): Snapshot {
 }
 
 /** Everything goal-related, assembled once so the UI gets it in one hop. */
+/**
+ * Sync state is refreshed by the sync actions rather than fetched on
+ * every snapshot: a snapshot is built on the capture path, and that path
+ * does not make network calls.
+ */
+let lastSyncStatus: import('../core/sync').SyncStatus | null = null;
+let lastSyncError: string | null = null;
+
 function goalSnapshot(date: string) {
   // One read of the active target, reused throughout - this runs inside
   // every snapshot, including the one on the capture path.
@@ -92,6 +103,10 @@ function goalSnapshot(date: string) {
     waterToday: db.get<{ value: number }>(
       "SELECT value FROM v_daily_metric WHERE log_date = ? AND metric = 'water_glasses'", [date])
       ?.value ?? 0,
+    syncConfigured: hasSyncToken(db),
+    syncStatus: lastSyncStatus,
+    syncLastPulled: lastPulledAt(db),
+    syncError: lastSyncError,
   };
 }
 
@@ -255,6 +270,36 @@ async function handle(req: Request): Promise<unknown> {
            value = excluded.value, recorded_at = excluded.recorded_at`,
         [localDate(), Math.max(0, req.glasses), localIso()]);
       return snapshot();
+    }
+
+    case 'setSyncToken': {
+      setSyncToken(db, req.token);
+      lastSyncStatus = null;
+      lastSyncError = null;
+      if (req.token) {
+        // Verify immediately: a token that does not work should say so
+        // now, not the first time a sync silently returns nothing.
+        try { lastSyncStatus = await syncStatus(db); }
+        catch (e) { lastSyncError = e instanceof Error ? e.message : String(e); }
+      }
+      return snapshot();
+    }
+
+    case 'syncNow': {
+      lastSyncError = null;
+      try {
+        // Ask the server to refresh from Garmin, then collect what it has.
+        // A failure to reach Garmin still lets us import the last good
+        // window: stale data clearly labelled beats no data silently.
+        try { await triggerSync(db); }
+        catch (e) { lastSyncError = e instanceof Error ? e.message : String(e); }
+        const out = await pullFromSync(db);
+        lastSyncStatus = await syncStatus(db).catch(() => lastSyncStatus);
+        return { outcome: out, snapshot: snapshot() };
+      } catch (e) {
+        lastSyncError = e instanceof Error ? e.message : String(e);
+        return { outcome: null, snapshot: snapshot() };
+      }
     }
 
     case 'exportDb': {

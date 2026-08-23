@@ -155,6 +155,18 @@ export class Store {
     this.current = await this.send<Snapshot>({ method: 'logWater', glasses });
   }
 
+  async setSyncToken(token: string | null): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'setSyncToken', token });
+  }
+
+  async syncNow(): Promise<{ activities: number; metricRows: number; since: string } | null> {
+    const r = this.adopt(await this.send<{
+      outcome: { activities: number; metricRows: number; since: string } | null;
+      snapshot: Snapshot;
+    }>({ method: 'syncNow' }));
+    return r.outcome;
+  }
+
   exportBytes(): Promise<Uint8Array | null> {
     return this.send<Uint8Array | null>({ method: 'exportDb' });
   }

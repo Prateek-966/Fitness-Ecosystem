@@ -548,8 +548,75 @@ export function diagnosticsView(ctx: Ctx): HTMLElement {
           + 'label figure is ±22%, because that is what FSSAI actually permits.',
     })));
 
-  // ---- garmin ----
-  wrap.append(h('h2', { text: 'Body data (Garmin)' }));
+  // ---- garmin auto-sync ----
+  wrap.append(h('h2', { text: 'Garmin auto-sync' }));
+  const syncCard = h('div', { class: 'card' });
+  const st = ctx.snap.syncStatus;
+
+  if (ctx.snap.syncConfigured) {
+    syncCard.append(h('ul', { class: 'list' },
+      goalRow('Server', st ? `${st.adapter}${st.credentialsConfigured ? '' : ' — no Garmin credentials'}` : 'not reachable'),
+      goalRow('Server last pulled Garmin', st?.lastSuccessAt ? st.lastSuccessAt.slice(0, 16).replace('T', ' ') : 'never'),
+      goalRow('App last collected', ctx.snap.syncLastPulled
+        ? ctx.snap.syncLastPulled.slice(0, 16).replace('T', ' ') : 'never'),
+      st?.intervalMin ? goalRow('Automatic every', `${st.intervalMin} min`) : null as any,
+    ));
+  }
+
+  if (ctx.snap.syncError) {
+    // A sync that fails quietly is worse than none: you would carry on
+    // believing the numbers were fresh.
+    syncCard.append(h('div', { class: 'incomplete', text: `Sync problem: ${ctx.snap.syncError}` }));
+  }
+  if (st?.lastError) {
+    syncCard.append(h('div', { class: 'incomplete', text:
+      `The server's last Garmin pull failed: ${st.lastError}` }));
+  }
+
+  const tokenInput = h('input', {
+    type: 'password', placeholder: ctx.snap.syncConfigured ? '•••••• (set)' : 'paste SYNC_TOKEN',
+    autocomplete: 'off',
+  });
+  syncCard.append(field('Sync token', tokenInput));
+  syncCard.append(h('div', { class: 'actions' },
+    h('button', {
+      class: 'btn quiet', text: 'Forget',
+      onclick: () => void after(ctx, ctx.store.setSyncToken(null), 'Token cleared.'),
+    }),
+    h('button', {
+      class: 'btn', text: 'Save token',
+      onclick: () => {
+        if (!tokenInput.value.trim()) { toast('Paste the token first.', { tone: 'warn' }); return; }
+        void after(ctx, ctx.store.setSyncToken(tokenInput.value.trim()), 'Token saved.');
+      },
+    }),
+    h('button', {
+      class: 'btn primary', text: 'Sync now',
+      onclick: async () => {
+        if (!ctx.snap.syncConfigured) { toast('Set the sync token first.', { tone: 'warn' }); return; }
+        try {
+          const out = await ctx.store.syncNow();
+          ctx.rerender();
+          toast(out
+            ? `Pulled ${out.activities} workouts and ${out.metricRows} daily values.`
+            : 'Sync failed — see the message above.',
+            { tone: out ? 'ok' : 'error' });
+        } catch (e) { toast((e as Error).message, { tone: 'error' }); }
+      },
+    })));
+  syncCard.append(h('p', { class: 'hint', text:
+    'Auto-pull needs a server, because Garmin requires an OAuth secret and somewhere to push '
+    + 'to, and a browser page can hold neither. The server runs on your own infrastructure, '
+    + 'holds your Garmin credentials, and keeps only a rolling window — your history stays here, '
+    + 'in this browser.' }));
+  syncCard.append(h('p', { class: 'hint', text:
+    'Everything it pulls goes through the same import the CSV path uses, so the same guarantees '
+    + 'hold: re-pulling corrects rather than duplicates, Garmin\'s calorie figure stays its own '
+    + 'estimate, and a missing metric stays missing rather than becoming zero.' }));
+  wrap.append(syncCard);
+
+  // ---- garmin file import ----
+  wrap.append(h('h2', { text: 'Body data (Garmin file)' }));
   const garminFile = h('input', { type: 'file', accept: '.csv,text/csv' });
   garminFile.addEventListener('change', async () => {
     const f = garminFile.files?.[0];

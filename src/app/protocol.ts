@@ -9,6 +9,7 @@ import type {
   ActiveTarget, BodyProfile, MacroBudget, MealTarget, TargetSource, WeightProgress,
 } from '../core/energy';
 import type { DayPlan } from '../core/cycling';
+import type { SyncStatus } from '../core/sync';
 
 /**
  * Everything the UI needs to draw itself, fetched in one round trip.
@@ -45,6 +46,11 @@ export interface Snapshot {
   /** Today's actuals for the non-food goals. */
   stepsToday: number | null;
   waterToday: number;
+  /** Garmin auto-sync. Null status means no token is set. */
+  syncConfigured: boolean;
+  syncStatus: SyncStatus | null;
+  syncLastPulled: string | null;
+  syncError: string | null;
   persistent: boolean;
 }
 
@@ -74,6 +80,8 @@ export type Request =
   | { method: 'planWeek' }
   | { method: 'clearPlan' }
   | { method: 'logWater'; glasses: number }
+  | { method: 'setSyncToken'; token: string | null }
+  | { method: 'syncNow' }
   | { method: 'exportDb' };
 
 export interface Envelope { id: number; req: Request }

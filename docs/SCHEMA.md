@@ -327,6 +327,20 @@ redeploy to change never gets tuned. All are editable in the app.
 | `steps_goal` | `10000` | actuals come from the watch |
 | `max_cycle_swing` | `0.2` | how far a day may move from flat. 0 disables cycling |
 
+## 11b. `app_secret` — the sync credential
+
+One row, one purpose: the bearer token the app presents to its sync
+server.
+
+**Separate from `app_setting` deliberately.** The snapshot the UI renders
+from carries every setting; a credential has no business crossing that
+boundary, and a test asserts it never appears there.
+
+Kept in OPFS rather than `localStorage`, which is readable by any script
+that ever runs on this origin. Under a strict CSP that should be a
+distinction without a difference — but a credential is the wrong thing to
+protect with only one layer.
+
 ## 12. `imported_entry` — Healthify history
 
 Names, portions **as written**, and timestamps. There is deliberately **no

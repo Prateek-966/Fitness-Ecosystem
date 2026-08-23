@@ -1,0 +1,14 @@
+{
+  "name": "nutrition-log-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Serves the PWA and pulls Garmin data on a schedule.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --experimental-strip-types src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": { "node": ">=22" }
+}

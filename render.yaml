@@ -1,71 +1,47 @@
-# Render Blueprint — https://render.com/docs/blueprint-spec
+# Render Blueprint - https://render.com/docs/blueprint-spec
 #
-# This is a pure static site: `vite build` emits a folder of files and
-# there is no server, no database and no environment secret. All state
-# lives in the visitor's own browser (OPFS), which is the whole design.
+# A WEB SERVICE, not a static site. The app was a static site until
+# auto-pull from Garmin was required: that needs somewhere to hold an
+# OAuth credential and run a schedule, and a browser page can hold
+# neither. The service serves the built app AND the sync API from one
+# origin, so connect-src stays 'self' and there is no CORS.
 #
-# The one thing hosting actually buys: HTTPS. Web Speech and OPFS both
-# require a secure context, so the app cannot do its job from a plain
-# http:// LAN address — but it works from any https:// origin.
+# Trade to know about: a free-tier web service sleeps after ~15 minutes
+# idle and cold-starts in roughly 50 seconds. Your data is unaffected -
+# it lives in your browser - but the first open after a gap is slow, and
+# a sleeping service does not run its sync schedule. Upgrade the instance
+# if the automation matters more than the cost.
 services:
   - type: web
     name: nutrition-log
-    runtime: static
-    # NODE_ENV=production would skip devDependencies, and vite/typescript
-    # live there. --include=dev is explicit rather than lucky.
-    buildCommand: npm ci --include=dev && npm run build
-    staticPublishPath: ./dist
-    pullRequestPreviewsEnabled: false
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
 
-    # No `routes:` rewrite on purpose. The app has no client-side router —
-    # tabs are in-memory state, nothing touches history.pushState — so a
-    # catch-all rewrite to /index.html would buy nothing and would turn a
-    # genuinely missing asset into a 200 of HTML, which the service
-    # worker would then cache under an asset URL.
+    disk:
+      # Session tokens and the rolling Garmin window. Small on purpose:
+      # this is a buffer, not the store of record.
+      name: sync-data
+      mountPath: /app/data
+      sizeGB: 1
 
-    headers:
-      # Vite content-hashes everything under /assets, so those filenames
-      # are immutable by construction and safe to cache forever.
-      - path: /assets/*
-        name: Cache-Control
-        value: public, max-age=31536000, immutable
+    envVars:
+      # Required. Generate with: openssl rand -hex 32
+      # The app presents this as a bearer token; without it the service
+      # refuses to start, because a public URL serving someone's sleep and
+      # heart-rate history to any caller must not happen by omission.
+      - key: SYNC_TOKEN
+        generateValue: true
 
-      # The service worker must never be cached: a stale sw.js is a site
-      # that can never update itself again.
-      - path: /sw.js
-        name: Cache-Control
-        value: no-cache
+      # Your Garmin Connect login. Leave unset to serve the app only and
+      # keep using CSV import.
+      - key: GARMIN_EMAIL
+        sync: false
+      - key: GARMIN_PASSWORD
+        sync: false
 
-      - path: /index.html
-        name: Cache-Control
-        value: no-cache
-
-      - path: /manifest.webmanifest
-        name: Cache-Control
-        value: no-cache
-
-      # Same policy the build injects as a <meta> tag. Both are enforced,
-      # so they are kept identical — a mismatch would silently apply the
-      # intersection of the two.
-      - path: /*
-        name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
-
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-
-      - path: /*
-        name: Referrer-Policy
-        value: no-referrer
-
-      # This page holds months of personal health data. Nothing should be
-      # able to frame it, and no site should be able to ask it for a
-      # camera, a location or a payment handler.
-      - path: /*
-        name: X-Frame-Options
-        value: DENY
-
-      - path: /*
-        name: Permissions-Policy
-        value: "geolocation=(), camera=(), payment=(), interest-cohort=()"
+      # Garmin publishes daily summaries a few times a day; polling faster
+      # earns nothing and spends goodwill with their rate limiter.
+      - key: SYNC_INTERVAL_MIN
+        value: "180"

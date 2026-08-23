@@ -53,6 +53,41 @@ The CLI writes to `data/nutrition.sqlite3` (gitignored). Override with
 
 ---
 
+## Garmin
+
+Two ways in, and the second is why this app has a server at all.
+
+**File import** — export a CSV from Garmin Connect, drop it into
+Diagnostics. No server, no credentials, nothing to run.
+
+**Auto-sync** — the server signs in to Garmin on a schedule and the app
+collects what it found. Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` on the
+service, paste the `SYNC_TOKEN` into Diagnostics, done.
+
+Auto-pull cannot be done from a browser: Garmin needs an OAuth client
+secret and somewhere to push to, and a page can hold neither. So it needs
+a server that holds a credential and sees your health data in transit —
+which is exactly why the app shipped with file import first, and why the
+server is designed to be run **on infrastructure you control**.
+
+What the server is: a *fetcher*, holding session tokens and a rolling
+90-day window. Your history still lives in your browser. Delete the
+server and you lose the automation, not the data. See
+[`server/README.md`](server/README.md).
+
+Everything it pulls goes through the **same import path as a CSV**, so
+every guarantee already tested holds identically — re-pulling corrects
+rather than duplicates, Garmin's calorie figure stays its own estimate,
+and a missing metric stays missing rather than becoming zero.
+
+> **The Connect adapter is not verified against live Garmin.** This
+> project was developed without outbound network access. The flow is
+> written to the documented shape and every step fails loudly and
+> separately, so the first real run tells you exactly which one is wrong.
+> Garmin's official Health API is a partner programme requiring approval;
+> if you are granted it, it drops in as a second adapter behind the same
+> four-method interface. MFA accounts are not supported and say so.
+
 ## Deploying
 
 The app is a folder of static files. It has no server, no database, no
@@ -90,6 +125,7 @@ Verify the built output before trusting a deploy:
 ```sh
 npm run test:hosted   # serves dist/ from a dumb static server, runs the
                       # full browser suite against it, checks the SW
+npm run test:sync     # boots the real server, drives the app against it
 ```
 
 That serves `dist/` with nothing but a MIME table — no rewrites, no dev

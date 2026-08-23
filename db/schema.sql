@@ -478,6 +478,24 @@ CREATE TABLE app_setting (
 
 
 -- ------------------------------------------------------------
+-- 11b. SECRETS
+-- Separate from app_setting so a credential is never returned by
+-- the code path that reads settings - the snapshot the UI renders
+-- from includes every setting, and a bearer token has no business
+-- crossing that boundary.
+--
+-- Kept in OPFS rather than localStorage: localStorage is readable
+-- by any script that ever runs on this origin, OPFS is not. Under
+-- a strict CSP that should be a distinction without a difference,
+-- but a credential is the wrong thing to protect with one layer.
+-- ------------------------------------------------------------
+CREATE TABLE app_secret (
+    key     TEXT PRIMARY KEY,
+    value   TEXT NOT NULL
+);
+
+
+-- ------------------------------------------------------------
 -- 12. IMPORTED HISTORY  (Healthify)
 -- Names, portions-as-written and timestamps ONLY. There is
 -- deliberately no kcal column here: a different food database
