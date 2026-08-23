@@ -1,0 +1,126 @@
+food_code,food_name,energy_kcal,protein,fat,carbohydrate,fibre,default_unit
+S001,Roti wheat,297,10.1,1.2,58.0,10.2,piece
+S002,Chapati,297,10.1,1.2,58.0,10.2,piece
+S003,Paratha plain,326,7.5,12.5,45.0,4.5,piece
+S004,Naan,310,9.0,6.0,54.0,2.5,piece
+S005,Rice white cooked,130,2.7,0.3,28.2,0.4,katori
+S006,Rice brown cooked,123,2.7,1.0,25.6,1.6,katori
+S007,Poha,130,2.6,3.1,23.0,1.0,katori
+S008,Upma,145,3.4,5.5,20.0,1.6,katori
+S009,Idli,135,4.6,0.5,27.0,1.2,piece
+S010,Dosa plain,168,3.9,5.0,26.0,1.4,piece
+S011,Masala dosa,195,4.2,8.5,26.5,2.0,piece
+S012,Uttapam,180,5.0,6.0,26.0,1.8,piece
+S013,Bread white,265,9.0,3.2,49.0,2.7,piece
+S014,Bread brown,247,13.0,3.4,41.0,7.0,piece
+S015,Oats raw,389,16.9,6.9,66.3,10.6,katori
+S016,Muesli,375,10.0,10.0,60.0,7.0,katori
+S017,Dal toor cooked,116,7.0,0.4,20.0,4.5,katori
+S018,Dal moong cooked,105,7.0,0.4,19.0,5.0,katori
+S019,Dal masoor cooked,116,9.0,0.4,20.0,7.9,katori
+S020,Dal chana cooked,164,8.9,2.6,27.4,7.6,katori
+S021,Rajma cooked,118,7.6,0.4,20.1,6.4,katori
+S022,Chole chickpeas cooked,164,8.9,2.6,27.4,7.6,katori
+S023,Sambar,85,3.5,3.0,11.0,2.5,katori
+S024,Chana masala,180,7.0,7.0,22.0,6.0,katori
+S025,Paneer,265,18.3,20.8,1.2,0.0,katori
+S026,Paneer bhurji,235,15.0,17.0,5.0,1.0,katori
+S027,Palak paneer,180,9.0,13.0,7.0,2.5,katori
+S028,Curd whole milk,60,3.1,4.0,3.0,0.0,glass
+S029,Curd low fat,50,3.5,1.5,4.5,0.0,glass
+S030,Milk whole,61,3.2,3.3,4.8,0.0,glass
+S031,Milk toned,58,3.1,3.0,4.7,0.0,glass
+S032,Buttermilk,40,1.7,0.9,4.8,0.0,glass
+S033,Cheese processed,321,20.0,25.0,3.5,0.0,g
+S034,Butter,717,0.9,81.1,0.1,0.0,g
+S035,Ghee,900,0.0,100.0,0.0,0.0,g
+S036,Egg whole boiled,155,12.6,10.6,1.1,0.0,piece
+S037,Egg white,52,10.9,0.2,0.7,0.0,piece
+S038,Egg omelette,154,10.6,11.7,0.6,0.0,piece
+S039,Chicken breast cooked,165,31.0,3.6,0.0,0.0,katori
+S040,Chicken curry,190,15.0,12.0,5.0,1.0,katori
+S041,Chicken tandoori,180,25.0,7.5,3.0,0.5,katori
+S042,Mutton curry,250,17.0,18.0,4.0,0.8,katori
+S043,Fish curry,150,16.0,7.0,4.0,0.5,katori
+S044,Fish grilled,180,22.0,9.0,0.0,0.0,katori
+S045,Prawns cooked,99,24.0,0.3,0.2,0.0,katori
+S046,Potato boiled,87,1.9,0.1,20.1,1.8,g
+S047,Aloo sabzi,120,2.2,5.5,16.0,2.2,katori
+S048,Bhindi sabzi,105,2.0,6.5,9.0,3.2,katori
+S049,Baingan bharta,110,1.8,7.5,9.5,3.0,g
+S050,Cauliflower sabzi,90,2.2,5.5,8.0,2.5,katori
+S051,Mixed vegetable sabzi,95,2.5,5.0,10.0,3.0,katori
+S052,Palak cooked,45,3.0,2.0,4.0,2.5,katori
+S053,Cabbage cooked,50,1.3,2.5,6.0,2.2,katori
+S054,Carrot raw,41,0.9,0.2,9.6,2.8,g
+S055,Cucumber raw,16,0.7,0.1,3.6,0.5,g
+S056,Tomato raw,18,0.9,0.2,3.9,1.2,g
+S057,Onion raw,40,1.1,0.1,9.3,1.7,g
+S058,Salad green mixed,25,1.5,0.2,4.0,1.8,katori
+S059,Broccoli cooked,35,2.4,0.4,7.2,3.3,katori
+S060,Beans green cooked,45,2.4,0.3,9.0,3.4,katori
+S061,Apple,52,0.3,0.2,13.8,2.4,piece
+S062,Banana,89,1.1,0.3,22.8,2.6,piece
+S063,Orange,47,0.9,0.1,11.8,2.4,piece
+S064,Mango,60,0.8,0.4,15.0,1.6,piece
+S065,Papaya,43,0.5,0.3,10.8,1.7,g
+S066,Grapes,69,0.7,0.2,18.1,0.9,g
+S067,Watermelon,30,0.6,0.2,7.6,0.4,g
+S068,Pomegranate,83,1.7,1.2,18.7,4.0,piece
+S069,Guava,68,2.6,1.0,14.3,5.4,piece
+S070,Almonds,579,21.2,49.9,21.6,12.5,g
+S071,Cashews,553,18.2,43.9,30.2,3.3,g
+S072,Walnuts,654,15.2,65.2,13.7,6.7,g
+S073,Peanuts roasted,567,25.8,49.2,16.1,8.5,g
+S074,Pistachios,560,20.2,45.3,27.2,10.6,g
+S075,Dates,282,2.5,0.4,75.0,8.0,g
+S076,Raisins,299,3.1,0.5,79.2,3.7,g
+S077,Chia seeds,486,16.5,30.7,42.1,34.4,g
+S078,Flax seeds,534,18.3,42.2,28.9,27.3,g
+S079,Peanut butter,588,25.1,50.4,20.0,6.0,g
+S080,Whey protein isolate,373,86.0,1.0,3.0,0.0,glass
+S081,Whey protein concentrate,400,76.0,7.0,10.0,0.0,glass
+S082,Idli sambar plate,120,4.2,1.8,22.0,2.0,piece
+S083,Biryani chicken,190,9.0,7.0,23.0,1.5,katori
+S084,Biryani vegetable,165,4.0,6.0,24.0,2.0,katori
+S085,Pulao vegetable,150,3.5,5.0,23.0,1.8,katori
+S086,Khichdi,120,4.5,3.0,19.0,2.2,katori
+S087,Curd rice,110,3.0,3.5,17.0,0.6,glass
+S088,Rajma chawal,135,5.0,2.5,23.0,3.5,katori
+S089,Samosa,262,5.0,15.0,28.0,2.5,piece
+S090,Pakora,270,6.0,17.0,23.0,3.0,piece
+S091,Vada pav,290,7.0,12.0,38.0,2.8,piece
+S092,Pav bhaji,180,4.0,9.0,21.0,3.5,katori
+S093,Chole bhature,280,8.0,13.0,33.0,4.5,piece
+S094,Dhokla,160,6.0,4.0,25.0,2.0,piece
+S095,Poori,340,6.5,18.0,38.0,2.5,piece
+S096,Papad roasted,320,22.0,2.0,52.0,10.0,piece
+S097,Pizza cheese,266,11.0,10.0,33.0,2.3,piece
+S098,Burger veg,250,9.0,10.0,31.0,2.5,piece
+S099,Pasta cooked,131,5.0,1.1,25.0,1.8,katori
+S100,Maggi noodles,440,9.5,17.0,60.0,2.5,katori
+S101,Sandwich veg,220,7.0,8.0,30.0,2.5,piece
+S102,French fries,312,3.4,15.0,41.0,3.8,g
+S103,Chai with milk sugar,60,1.5,2.0,9.0,0.0,glass
+S104,Coffee with milk sugar,55,1.6,1.8,8.0,0.0,glass
+S105,Black coffee,2,0.1,0.0,0.3,0.0,glass
+S106,Green tea,1,0.0,0.0,0.2,0.0,glass
+S107,Lassi sweet,110,3.0,3.5,17.0,0.0,glass
+S108,Coconut water,19,0.7,0.2,3.7,1.1,glass
+S109,Orange juice,45,0.7,0.2,10.4,0.2,piece
+S110,Cola soft drink,42,0.0,0.0,10.6,0.0,glass
+S111,Beer,43,0.5,0.0,3.6,0.0,glass
+S112,Wine red,85,0.1,0.0,2.6,0.0,glass
+S113,Whisky,250,0.0,0.0,0.1,0.0,glass
+S114,Gulab jamun,300,4.0,12.0,45.0,0.5,piece
+S115,Rasgulla,186,4.0,3.0,36.0,0.0,piece
+S116,Kheer,145,4.0,5.0,21.0,0.5,katori
+S117,Halwa suji,350,5.0,15.0,49.0,1.2,katori
+S118,Ice cream vanilla,207,3.5,11.0,24.0,0.7,katori
+S119,Chocolate milk bar,535,7.6,29.7,59.4,3.4,glass
+S120,Biscuit digestive,480,7.0,21.0,63.0,3.5,piece
+S121,Sugar,387,0.0,0.0,100.0,0.0,g
+S122,Honey,304,0.3,0.0,82.4,0.2,g
+S123,Oil sunflower,884,0.0,100.0,0.0,0.0,g
+S124,Oil mustard,884,0.0,100.0,0.0,0.0,g
+S125,Coconut fresh,354,3.3,33.5,15.2,9.0,g

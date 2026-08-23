@@ -4,6 +4,7 @@ import { Mic, speechSupported } from './app/speech';
 import { h, clear, fmt } from './app/dom';
 import { toast } from './app/toast';
 import { absNow } from './core/clock';
+import { parse } from './core/parse';
 import { calibrateView, diagnosticsView, goalView, pendingView, todayView } from './app/views';
 
 type Tab = 'today' | 'pending' | 'goal' | 'measures' | 'diagnostics';
@@ -35,6 +36,8 @@ function render(): void {
   const snap = store.snapshot;
   const ctx = {
     store, snap, rerender: render,
+    /** Move to another tab. Only the first-run notice uses this. */
+    go: (to: string) => { tab = to as Tab; render(); },
     onAddTo: (slot: string | null) => {
       pendingSlot = slot;
       render();
@@ -113,16 +116,31 @@ function micPanel(): HTMLElement {
     if (!started) idle();
   };
 
-  const typed = h('input', { type: 'text', placeholder: 'or type it — "two rotis, one katori dal"' });
+  const typed = h('input', {
+    type: 'text',
+    placeholder: 'or type it — "two rotis, one katori dal"',
+    autocomplete: 'off',
+    role: 'combobox',
+    'aria-expanded': 'false',
+  });
+  const suggestions = h('ul', { class: 'suggest', role: 'listbox' });
+  const picker = foodPicker(typed, suggestions);
+
   typed.addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key !== 'Enter' || !typed.value.trim()) return;
+    const key = (e as KeyboardEvent).key;
+    // The list gets first refusal on the navigation keys, so Enter
+    // takes a highlighted suggestion rather than logging past it.
+    if (picker.handleKey(key, e as KeyboardEvent)) return;
+    if (key !== 'Enter' || !typed.value.trim()) return;
     const now = absNow();
     const text = typed.value.trim();
     typed.value = '';
+    picker.close();
     void commit(text, now, now, null);
   });
 
-  const capture = h('div', { class: 'card capture' }, typed);
+  const capture = h('div', { class: 'card capture' },
+    h('div', { class: 'combo' }, typed, suggestions));
   if (pendingSlot) {
     capture.prepend(h('div', { class: 'slot-target' },
       h('span', { text: `logging to ${pendingSlot}` }),
@@ -133,6 +151,135 @@ function micPanel(): HTMLElement {
   }
 
   return h('div', {}, h('div', { class: 'mic-wrap' }, button, heard), capture);
+}
+
+/**
+ * The food picker.
+ *
+ * What it is FOR: the app knows a food or it does not, and typing
+ * "paneer bhurji" into a database that calls it something else fails
+ * silently into the slow-path queue. Showing what is actually in there,
+ * as you type, turns a later correction into an immediate choice.
+ *
+ * It searches on the food phrase the REAL PARSER extracts, not on the
+ * raw string - "two rotis" has to search for "roti", and parse.ts
+ * already knows how to strip a quantity and singularise a word. A second
+ * implementation of that here would drift from the first one and the two
+ * would disagree about what the user typed.
+ *
+ * Selecting a row rewrites only the food phrase and leaves the quantity
+ * alone, so "two rot" becomes "two Roti wheat" rather than losing the
+ * two. Nothing is logged by selecting; the entry still goes through the
+ * same Enter, the same parser and the same commit path as before, which
+ * is the point - this is an aid to typing, not a second way in.
+ */
+function foodPicker(input: HTMLInputElement, list: HTMLElement) {
+  let hits: Array<{ id: number; name: string; kcal: number | null }> = [];
+  let active = -1;
+  let token = 0;
+
+  const close = () => {
+    hits = [];
+    active = -1;
+    clear(list);
+    list.dataset.open = '0';
+    input.setAttribute('aria-expanded', 'false');
+  };
+
+  const draw = () => {
+    clear(list);
+    if (hits.length === 0) { close(); return; }
+    list.dataset.open = '1';
+    input.setAttribute('aria-expanded', 'true');
+    hits.forEach((f, i) => {
+      list.append(h('li', {
+        role: 'option',
+        'aria-selected': i === active ? 'true' : 'false',
+        // mousedown, not click: the input blurs before a click lands and
+        // the blur handler would have closed the list underneath it.
+        onmousedown: (e: Event) => { e.preventDefault(); choose(i); },
+      },
+      h('span', { class: 'suggest-name', text: f.name }),
+      h('span', { class: 'suggest-kcal',
+        text: f.kcal === null ? '' : `${Math.round(f.kcal)} per 100 g` })));
+    });
+  };
+
+  /**
+   * Replace the food words, keep the quantity.
+   *
+   * rawPhrase is the WHOLE item including its quantity and unit - "two
+   * rot" for phrase "rot" - so swapping rawPhrase for the food name
+   * silently eats the two. The food words are the last N words of
+   * rawPhrase, where N is the word count of the normalised phrase:
+   * singularising changes "rotis" to "roti" but never changes how many
+   * words there are.
+   */
+  const choose = (i: number) => {
+    const f = hits[i];
+    if (!f) return;
+    const items = parse(input.value);
+    const last = items[items.length - 1];
+    const raw = last?.rawPhrase ?? '';
+    const at = raw ? input.value.toLowerCase().lastIndexOf(raw.toLowerCase()) : -1;
+
+    if (at >= 0) {
+      const words = raw.split(/\s+/);
+      const foodWordCount = (last!.phrase.trim().split(/\s+/).length) || 1;
+      const keep = words.slice(0, Math.max(0, words.length - foodWordCount)).join(' ');
+      const replacement = keep ? `${keep} ${f.name}` : f.name;
+      input.value = input.value.slice(0, at) + replacement + input.value.slice(at + raw.length);
+    } else {
+      input.value = f.name;
+    }
+    close();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  };
+
+  const search = async () => {
+    const items = parse(input.value);
+    // The phrase being typed is the last one, and a bare "rot" the
+    // parser cannot place still deserves a lookup.
+    const q = (items[items.length - 1]?.phrase
+      ?? input.value.trim().split(/[\s,]+/).pop() ?? '').trim();
+    if (q.length < 2) { close(); return; }
+
+    const mine = ++token;
+    const found = await store.searchFoods(q);
+    // A slower earlier query must not overwrite a newer one's results.
+    if (mine !== token) return;
+    hits = found.slice(0, 8);
+    active = -1;
+    draw();
+  };
+
+  let debounce: number | undefined;
+  input.addEventListener('input', () => {
+    clearTimeout(debounce);
+    // Short enough to feel immediate, long enough that a fast typist
+    // does not run a query per keystroke.
+    debounce = window.setTimeout(() => void search(), 120);
+  });
+  input.addEventListener('blur', () => window.setTimeout(close, 120));
+
+  return {
+    close,
+    handleKey(key: string, e: KeyboardEvent): boolean {
+      if (list.dataset.open !== '1') return false;
+      if (key === 'ArrowDown' || key === 'ArrowUp') {
+        e.preventDefault();
+        active = key === 'ArrowDown'
+          ? Math.min(active + 1, hits.length - 1)
+          : Math.max(active - 1, -1);
+        draw();
+        return true;
+      }
+      if (key === 'Escape') { e.preventDefault(); close(); return true; }
+      if (key === 'Enter' && active >= 0) { e.preventDefault(); choose(active); return true; }
+      return false;
+    },
+  };
 }
 
 /**

@@ -71,3 +71,34 @@ INSERT OR IGNORE INTO app_setting (key, value) VALUES
     -- How many times a food combination must recur before the app
     -- names it as a meal of yours.
     ('meal_recognise_min',    '3');
+
+-- ------------------------------------------------------------
+-- Starter household measures.
+--
+-- Principle 7 says toGrams() returns NULL rather than inventing grams
+-- for a measure you have never weighed, and that stands - it is what
+-- stops the app quietly making numbers up. These rows are the escape
+-- hatch the same principle already provides: user_measure.basis
+-- distinguishes 'weighed' (you put it on a scale, trust it) from
+-- 'estimated' (a guess, still stable, wider band), and these are
+-- explicitly estimated.
+--
+-- Without them a new database can resolve a food and still not know
+-- what "two rotis" weighs, so every entry lands pending and the app
+-- looks broken on first use. With them it works immediately and says,
+-- on the Measures screen, that it is guessing until you weigh yours.
+--
+-- INSERT OR IGNORE against the uniqueness indexes, so weighing your own
+-- katori replaces this permanently and re-running seed never undoes it.
+-- ------------------------------------------------------------
+INSERT OR IGNORE INTO user_measure (food_id, unit_id, grams, basis, calibrated_at)
+SELECT NULL, u.id, m.grams, 'estimated', datetime('now')
+  -- ONLY the three the starter bank actually needs. Pre-calibrating
+  -- every unit would make principle 7's guarantee - that toGrams()
+  -- returns NULL rather than inventing grams - unreachable in practice
+  -- and untestable, which is too high a price for saving someone one
+  -- weighing. cup, tbsp and tsp stay uncalibrated on purpose.
+  FROM (SELECT 'piece' AS code, 45 AS grams
+        UNION ALL SELECT 'katori', 150
+        UNION ALL SELECT 'glass',  200) m
+  JOIN unit u ON u.code = m.code;

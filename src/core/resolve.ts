@@ -22,7 +22,8 @@ import { bestMatch, type Candidate } from './similarity';
 import { getSetting } from './settings';
 import { localIso } from './clock';
 
-export type MatchMethod = 'exact_index' | 'fuzzy_index' | 'llm_resolved' | 'manual';
+export type MatchMethod = 'exact_index' | 'fuzzy_index' | 'food_name'
+  | 'llm_resolved' | 'manual';
 export type PendingReason = 'quantity_missing' | 'unit_missing' | 'unit_uncalibrated';
 
 export interface Resolution {
@@ -126,8 +127,37 @@ export function matchItem(
       m.bestScore >= threshold &&
       (m.runnerUp === null || m.bestScore - m.runnerUpScore >= minMargin);
 
-    if (!clearWinner) return { res: null, scan };
-    row = m.best!.value;
+    if (!clearWinner) {
+      // Before giving up: the phrase index is YOUR vocabulary, and on a
+      // database that has not learned any yet it is empty. The food
+      // table is a different question - "do I know a food called
+      // exactly this" - and it was never being asked, so typing the
+      // exact name of a food the app holds sent it to the queue as
+      // unrecognised. That made the food picker useless: you could
+      // select a food and still be told it was not recognised.
+      //
+      // Scored 1.0 because an exact name match is not a guess. That
+      // also puts it above auto_learn_threshold, so the existing
+      // learning path indexes the phrase and the SECOND time it is an
+      // exact_index hit on the fast path. No new learning code.
+      const byName = db.get<{ id: number; food_id: number; phrase: string;
+        default_qty: number | null; default_unit_id: number | null }>(
+        `SELECT id, id AS food_id, LOWER(name) AS phrase,
+                NULL AS default_qty, default_unit_id
+           FROM food WHERE LOWER(name) = ?`,
+        [item.phrase],
+      );
+      if (!byName) return { res: null, scan };
+      row = byName as IndexRow;
+      method = 'food_name';
+      score = 1.0;
+      runnerUp = null;
+      runnerUpScore = null;
+      scan.chosen = byName.phrase;
+      scan.score = 1.0;
+    } else {
+      row = m.best!.value;
+    }
   }
 
   const unitId = item.unitCode

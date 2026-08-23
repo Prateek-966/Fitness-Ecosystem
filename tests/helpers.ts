@@ -57,9 +57,32 @@ export function calibrate(
   db: Db, unit: string, grams: number,
   basis: 'weighed' | 'estimated' = 'weighed', foodId: number | null = null,
 ): void {
-  db.run(
-    `INSERT INTO user_measure (food_id, unit_id, grams, basis, calibrated_at)
-     VALUES (?,?,?,?,?)`,
-    [foodId, unitId(db, unit), grams, basis, new Date().toISOString()],
-  );
+  // Upsert, exactly as recalibrate() does. A plain INSERT was safe only
+  // while user_measure started empty; seed.sql now ships estimated
+  // household measures so a new database can resolve "two rotis" at
+  // all, and a fixture that calibrates one has to overwrite rather than
+  // collide with it. The partial index is the conflict target because
+  // SQLite treats NULL food_id values as distinct - the trap this
+  // schema has already paid for three times.
+  const id = unitId(db, unit);
+  const at = new Date().toISOString();
+  if (foodId === null) {
+    db.run(
+      `INSERT INTO user_measure (food_id, unit_id, grams, basis, calibrated_at)
+       VALUES (NULL,?,?,?,?)
+       ON CONFLICT(unit_id) WHERE food_id IS NULL DO UPDATE SET
+         grams = excluded.grams, basis = excluded.basis,
+         calibrated_at = excluded.calibrated_at`,
+      [id, grams, basis, at],
+    );
+  } else {
+    db.run(
+      `INSERT INTO user_measure (food_id, unit_id, grams, basis, calibrated_at)
+       VALUES (?,?,?,?,?)
+       ON CONFLICT(food_id, unit_id) DO UPDATE SET
+         grams = excluded.grams, basis = excluded.basis,
+         calibrated_at = excluded.calibrated_at`,
+      [foodId, id, grams, basis, at],
+    );
+  }
 }

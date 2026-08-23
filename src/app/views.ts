@@ -17,6 +17,8 @@ type Ctx = {
   rerender: Rerender;
   /** Focus capture on a given meal slot. Supplied by main.ts. */
   onAddTo?: (slot: string | null) => void;
+  /** Switch tab. Supplied by main.ts; only the first-run notice uses it. */
+  go?: (to: string) => void;
 };
 
 const after = (ctx: Ctx, p: Promise<unknown>, msg: string) =>
@@ -83,6 +85,29 @@ export function todayView(ctx: Ctx): HTMLElement {
   }
 
   const wrap = h('div', {}, head);
+
+  // No food reference data means nothing can resolve, and the screen
+  // that results looks identical to a quiet day. Saying so is not
+  // onboarding - there is no wizard here and no dismiss button, just
+  // the app being honest about why it cannot work yet. It disappears
+  // the moment a food file is loaded.
+  if (ctx.snap.foodCount === 0) {
+    wrap.append(h('div', { class: 'card empty-first-run' },
+      h('div', { class: 'label', text: 'No food data loaded' }),
+      h('p', { text:
+        'Nothing can be logged until the app knows some foods. No food '
+        + 'database ships with it, because none of them are yours to '
+        + 'redistribute.' }),
+      h('p', { text:
+        'Open Diagnostics and load a CSV with columns food_code, '
+        + 'food_name, energy_kcal, protein, fat, carbohydrate. Then weigh '
+        + 'your katori and your glass once, under Measures.' }),
+      h('button', {
+        class: 'btn primary',
+        text: 'Open Diagnostics',
+        onclick: () => ctx.go?.('diagnostics'),
+      })));
+  }
 
   // Section order comes from the derived centres, so the day reads in the
   // order you actually eat rather than in an order chosen for you.

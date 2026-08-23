@@ -196,12 +196,16 @@ describe('household measures', () => {
   });
 
   it('holds the entry pending rather than inventing grams for an uncalibrated unit', () => {
-    const chai = addFood(db, 'Chai', 60);
-    indexPhrase(db, 'chai', chai);
-    const out = say('two glasses chai');
+    // tbsp, not glass: seed.sql now ships estimated calibrations for
+    // piece, katori and glass so a new database can resolve "two rotis"
+    // at all. It deliberately stops there, so this guarantee stays
+    // reachable with a real unit rather than becoming theoretical.
+    const honey = addFood(db, 'Honey', 304);
+    indexPhrase(db, 'honey', honey);
+    const out = say('two tablespoons honey');
     expect(out.items[0].status).toBe('pending_quantity');
     expect(out.items[0].reason).toBe('unit_uncalibrated');
-    expect(toGrams(db, chai, 2, unitId(db, 'glass'))).toBeNull();
+    expect(toGrams(db, honey, 2, unitId(db, 'tbsp'))).toBeNull();
   });
 
   it('passes absolute units straight through', () => {

@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import schemaSql from '../../db/schema.sql?raw';
 import seedSql from '../../db/seed.sql?raw';
+import starterFoodsCsv from '../../db/foods.starter.csv?raw';
 import { initSchema, type Db } from '../core/db';
 import { openDatabase, type BrowserDb } from '../platform/browser-db';
 import {
@@ -119,6 +120,32 @@ function refresh(): void {
   if (p) writeTargets(db, p);
 }
 
+/**
+ * Put something in the food table on a database that has never had any.
+ *
+ * The app shipped with nothing, on the reasoning that no food database
+ * is ours to redistribute - which is true of IFCT 2017 and was the
+ * right call for it. The cost was a first open that looks identical to
+ * a broken app: no foods means nothing resolves, so nothing can be
+ * logged, and the screen says "nothing logged yet" as though that were
+ * a choice the user made.
+ *
+ * So a small starter bank ships as DATA, in db/foods.starter.csv, and
+ * goes in through the same loadFoods() path as any other import - with
+ * a source and a relative error, never as values written into code,
+ * which principle 5 forbids outright.
+ *
+ * Only on an EMPTY table. Someone who has loaded a real food table, or
+ * deleted rows deliberately, does not want 125 rows appearing again on
+ * next launch.
+ */
+function seedStarterFoods(db: Db): void {
+  const existing = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM food')!.n;
+  if (existing > 0) return;
+  const { records } = parseFoodCsv(starterFoodsCsv);
+  loadFoods(db, records, 'starter');
+}
+
 async function handle(req: Request): Promise<unknown> {
   switch (req.method) {
     case 'boot': {
@@ -126,6 +153,7 @@ async function handle(req: Request): Promise<unknown> {
       db = opened.db;
       persistent = opened.persistent;
       initSchema(db, schemaSql, seedSql);
+      seedStarterFoods(db);
       refresh();
       return snapshot();
     }
@@ -198,10 +226,28 @@ async function handle(req: Request): Promise<unknown> {
       // % and _ are LIKE wildcards; a search for "100_ juice" should match
       // literally, not as a pattern.
       const q = req.q.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const like = q.toLowerCase();
+      // kcal comes along because a picker showing only names makes the
+      // user choose blind between "Rice white cooked" and "Pulao".
+      //
+      // Matches must begin a WORD. A bare substring match means "rot"
+      // offers carrot and whey protein isolate, which is not a search
+      // result, it is a coincidence. Nothing is lost that a person
+      // would have wanted: no one types the middle of a word.
       return db.all(
-        `SELECT id, name, brand, source FROM food
-         WHERE name LIKE ? ESCAPE '\\' ORDER BY LENGTH(name) LIMIT 12`,
-        [`%${q}%`],
+        `SELECT f.id, f.name, f.brand, f.source,
+                (SELECT per_100g FROM food_nutrient
+                  WHERE food_id = f.id AND nutrient = 'kcal') AS kcal
+           FROM food f
+          WHERE LOWER(f.name) LIKE ? ESCAPE '\\'
+             OR LOWER(f.name) LIKE ? ESCAPE '\\'
+          ORDER BY
+            -- Starting the name beats starting a later word: "rice"
+            -- offers Rice before Curd rice.
+            CASE WHEN LOWER(f.name) LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
+            LENGTH(f.name)
+          LIMIT 12`,
+        [`${like}%`, `% ${like}%`, `${like}%`],
       );
     }
 

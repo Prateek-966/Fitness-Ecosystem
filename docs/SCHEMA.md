@@ -78,6 +78,34 @@ defaults by source — `0.10` for a database, **`0.22` for a label**, because
 FSSAI permits ±20–25% tolerance on declared values and stored precision
 must not exceed real precision.
 
+
+### Food sources, and the band each carries
+
+| `source` | `rel_error` | What it is |
+|---|---|---|
+| `indb` | 0.10 | An Indian food composition table you supplied. |
+| `ifct2017` | 0.10 | IFCT 2017. Personal-use licensed — **never committed to this repo**. |
+| `usda_fdc` | 0.10 | USDA FoodData Central. Public domain. |
+| `label` | 0.22 | A packaged label. FSSAI permits ±20–25% on declared values, so the band reflects what a label actually promises rather than the two decimals it prints. |
+| `user_defined` | 0.25 | You typed it in. |
+| `starter` | 0.25 | The ~125-row bank in `db/foods.starter.csv` that ships with the app. |
+
+**Why a starter bank exists.** The app used to ship with nothing, on the
+reasoning that no food database is ours to redistribute — true of IFCT
+2017, and the right call for it. The cost was a first open that looked
+identical to a broken app: no foods means nothing resolves, so nothing
+can be logged, and the screen said "nothing logged yet" as though that
+were a choice the user had made.
+
+It carries the **widest band of any source** on purpose. These are
+typical composition figures, not values traced to a named laboratory
+analysis, and the app should say so in its error bars rather than imply
+a precision it has not got. It loads through the same `loadFoods()` path
+as any other import — never as values written into application code,
+which principle 5 forbids outright — and only into a food table that is
+completely empty, so it never reappears after someone has loaded a real
+table or deleted rows on purpose.
+
 ## 3. `unit`, `food_unit`, `user_measure` — personal calibration
 
 `unit.is_absolute = 1` means grams or millilitres: no conversion needed.

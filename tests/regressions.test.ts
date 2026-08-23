@@ -106,15 +106,18 @@ describe('the index obeys a correction', () => {
 // -----------------------------------------------------------------
 describe('calibration clears its own pending entries', () => {
   it('resolves an entry that was pending only for want of grams', () => {
-    const chai = addFood(db, 'Chai', 60);
-    indexPhrase(db, 'chai', chai);
-    const out = say('two glasses chai');
+    // tbsp rather than glass: seed.sql now ships an estimated glass, so
+    // a glass entry is no longer pending for want of grams. tbsp is one
+    // of the units deliberately left uncalibrated.
+    const honey = addFood(db, 'Honey', 304);
+    indexPhrase(db, 'honey', honey);
+    const out = say('two tablespoons honey');
     expect(out.items[0].reason).toBe('unit_uncalibrated');
 
-    const n = recalibrate(db, unitId(db, 'glass'), null, 180, 'weighed');
+    const n = recalibrate(db, unitId(db, 'tbsp'), null, 180, 'weighed');
     expect(n).toBe(1);
     const row = db.get<{ status: string; grams_resolved: number }>(
-      'SELECT status, grams_resolved FROM log_entry WHERE food_id = ?', [chai])!;
+      'SELECT status, grams_resolved FROM log_entry WHERE food_id = ?', [honey])!;
     expect(row).toMatchObject({ status: 'resolved', grams_resolved: 360 });
   });
 });
@@ -283,5 +286,61 @@ describe('a database created by an older version of the app', () => {
       "SELECT sql FROM sqlite_master WHERE name = 'v_session_energy'")?.sql ?? '';
     expect(sql).not.toContain('wrong');
     expect(sql).toContain('session_energy');
+  });
+});
+
+// -----------------------------------------------------------------
+// Typing the exact name of a food the app already holds.
+// -----------------------------------------------------------------
+describe('a food that exists but has never been said before', () => {
+  let fresh: Db;
+
+  beforeEach(() => {
+    fresh = freshDb();
+    addFood(fresh, 'Roti wheat', 297, { defaultUnit: 'piece' });
+    addFood(fresh, 'Whey protein isolate', 373);
+    calibrate(fresh, 'piece', 45);
+  });
+
+  const say = (text: string) => handleUtterance(fresh, {
+    rawText: text, spokenAt: new Date('2026-08-23T13:00:00Z'), tzOffsetMin: 330,
+  });
+
+  it('resolves by name when the phrase index has never heard of it', () => {
+    // matchItem only ever consulted phrase_index, which is YOUR
+    // vocabulary and is empty on a new database. So the app could hold
+    // a food called exactly what you typed and still queue it as
+    // unrecognised - which made the food picker useless: you could pick
+    // a food from a list and be told it was not recognised.
+    const out = say('two Roti wheat');
+    expect(out.items[0].action).toBe('logged');
+    expect(out.items[0].matchMethod).toBe('food_name');
+  });
+
+  it('learns it, so the second time is a fast-path hit', () => {
+    say('two Roti wheat');
+    const again = say('two Roti wheat');
+    expect(again.items[0].matchMethod).toBe('exact_index');
+    expect(again.fastPath).toBe(true);
+  });
+
+  it('handles a multi-word name', () => {
+    expect(say('one Whey protein isolate').items[0].action).toBe('logged');
+  });
+
+  it('still queues a food that genuinely is not there', () => {
+    // The fallback must not become a way to log anything at all.
+    expect(say('two biryani').items[0].action).toBe('slow_path');
+  });
+
+  it('does not let a name match beat your own vocabulary', () => {
+    // If you have taught the app that "roti" means something, that wins
+    // over a food that happens to be named similarly. Consistency
+    // beats accuracy is the first non-negotiable.
+    const other = addFood(fresh, 'Roti jowar', 320, { defaultUnit: 'piece' });
+    indexPhrase(fresh, 'roti wheat', other, 1, 'piece');
+    const out = say('two Roti wheat');
+    expect(out.items[0].matchMethod).toBe('exact_index');
+    expect(out.items[0].foodId).toBe(other);
   });
 });

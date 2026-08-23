@@ -16,7 +16,8 @@ import { splitCsv } from './csv';
  * that reason.
  */
 
-export type FoodSource = 'indb' | 'ifct2017' | 'usda_fdc' | 'label' | 'user_defined';
+export type FoodSource = 'indb' | 'ifct2017' | 'usda_fdc' | 'label'
+  | 'user_defined' | 'starter';
 
 /**
  * Default relative error by source. FSSAI permits ±20–25% tolerance on
@@ -30,10 +31,20 @@ export const DEFAULT_REL_ERROR: Record<FoodSource, number> = {
   usda_fdc: 0.10,
   label: 0.22,
   user_defined: 0.25,
+  // The starter bank is approximate reference data, shipped so the app
+  // is usable on first open rather than being a dead end. It carries the
+  // widest band deliberately: these are typical composition figures, not
+  // values traced to a specific laboratory analysis, and the app should
+  // say so in its error bars rather than imply a precision it has not
+  // got. Loading a real table later overwrites them, because a food is
+  // identified by (name, brand, source, source_ref).
+  starter: 0.25,
 };
 
 export interface FoodRecord {
   name: string;
+  /** Household measure this food is normally eaten in, e.g. 'piece'. */
+  defaultUnit?: string | null;
   brand?: string | null;
   sourceRef?: string | null;
   isComposite?: boolean;
@@ -88,12 +99,17 @@ export function parseFoodCsv(csv: string): { records: FoodRecord[]; unmapped: st
   const iName = find('food_name', 'name', 'food', 'description');
   const iRef = find('food_code', 'code', 'id', 'fdc_id');
   const iBrand = find('brand');
+  // The household measure this food is normally eaten in. Without it,
+  // "two rotis" parses a quantity of two and has no unit to apply it
+  // to, so the entry lands as pending forever - which is correct
+  // behaviour for an unknown food and useless for a known one.
+  const iUnit = find('default_unit', 'unit');
   if (iName < 0) return { records: [], unmapped: header };
 
   const nutrientCols: Array<[number, string]> = [];
   const unmapped: string[] = [];
   header.forEach((hcol, i) => {
-    if (i === iName || i === iRef || i === iBrand) return;
+    if (i === iName || i === iRef || i === iBrand || i === iUnit) return;
     const canon = canonicalNutrient(hcol);
     if (canon) nutrientCols.push([i, canon]);
     else unmapped.push(hcol);
@@ -112,6 +128,7 @@ export function parseFoodCsv(csv: string): { records: FoodRecord[]; unmapped: st
     }
     if (Object.keys(nutrients).length === 0) continue;
     records.push({
+      defaultUnit: iUnit >= 0 ? (cells[iUnit]?.trim() || null) : null,
       name,
       brand: iBrand >= 0 ? (cells[iBrand]?.trim() || null) : null,
       sourceRef: iRef >= 0 ? (cells[iRef]?.trim() || null) : null,
@@ -153,6 +170,19 @@ export function loadFoods(
            r.sourceRef ?? null, fetched, fetched],
         ).lastInsertRowid;
         inserted++;
+      }
+
+      // Set only when the file names one and the unit is known. An
+      // unrecognised unit name is dropped rather than invented, and a
+      // file that says nothing leaves an existing default alone.
+      if (r.defaultUnit) {
+        const unit = db.get<{ id: number }>(
+          'SELECT id FROM unit WHERE code = ?', [r.defaultUnit.toLowerCase()]);
+        if (unit) {
+          db.run('UPDATE food SET default_unit_id = ? WHERE id = ?', [unit.id, foodId]);
+          db.run(`INSERT OR IGNORE INTO food_unit (food_id, unit_id) VALUES (?,?)`,
+            [foodId, unit.id]);
+        }
       }
 
       for (const [nutrient, per100g] of Object.entries(r.nutrients)) {

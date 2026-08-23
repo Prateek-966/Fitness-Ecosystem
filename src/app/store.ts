@@ -109,9 +109,10 @@ export class Store {
   }
 
   searchFoods(q: string) {
-    return this.send<Array<{ id: number; name: string; brand: string | null; source: string }>>(
-      { method: 'searchFoods', q },
-    );
+    return this.send<Array<{
+      id: number; name: string; brand: string | null; source: string;
+      kcal: number | null;
+    }>>({ method: 'searchFoods', q });
   }
 
   async importFoodCsv(csv: string, source: FoodSource): Promise<LoadReport & { unmapped: string[] }> {
