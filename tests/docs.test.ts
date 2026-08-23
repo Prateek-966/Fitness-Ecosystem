@@ -130,3 +130,19 @@ describe('the DOM helper respects the shipped CSP', () => {
     }
   });
 });
+
+describe('the docs do not disclaim built features', () => {
+  it('FUNCTIONAL_SPEC no longer lists goals as out of scope', () => {
+    // Goal setting was owner-authorised into scope; a spec that still
+    // lists it under non-goals is documentation lying at readers.
+    const notBuilt = FUNC_MD.slice(FUNC_MD.indexOf('## 13'));
+    expect(notBuilt).not.toMatch(/goals and targets/);
+    expect(FUNC_MD).toContain('calculator.net');
+  });
+
+  it('SCHEMA documents the target precedence including cycled', () => {
+    for (const source of ['manual', 'cycled', 'adaptive', 'mifflin', 'harris', 'katch']) {
+      expect(SCHEMA_MD).toContain(source);
+    }
+  });
+});

@@ -268,7 +268,9 @@ implements none of them:
 - Garmin *API* sync. File import of Garmin exports **is** built
   (`src/core/garmin.ts`); live OAuth sync is not, and would require a
   server holding a token — see TECHNICAL_SPEC §13
-- The adaptive TDEE model, goals, calorie targets
+- The adaptive TDEE model (goal setting and formula-based calorie
+  targets ARE built, owner-authorised; the adaptive model that would
+  outrank them is not)
 - The exercise logger (`workout_session` / `session_energy` exist, unused)
 - Micronutrient UI
 - Any recommendation engine

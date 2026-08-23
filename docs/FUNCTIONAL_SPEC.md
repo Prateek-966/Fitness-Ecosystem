@@ -36,6 +36,7 @@ Four tabs. The UI is intentionally close to nothing.
 |---|---|
 | **Today** | mic button, typed fallback, day totals with error bars, and the day's entries **grouped by meal** |
 | **Queue** | entries needing an amount; phrases not recognised. Badge = combined count |
+| **Goal** | body profile, formula estimates side by side, macro budget, weekly calorie cycling, water and steps |
 | **Measures** | your household measures and what each weighs |
 | **Diagnostics** | acceptance criteria measured, thresholds, data import, backup |
 
@@ -229,6 +230,30 @@ and must never be committed to a repository.
 
 ---
 
+## 10b. Goal — owner-authorised addition
+
+Enter sex, age, height, weight (body fat only if measured), pick an
+activity level and a rate, and every formula that can run reports its
+estimate **side by side** — they disagree by a couple of hundred kcal on
+the same body, and hiding that would claim a precision none of them has.
+Constants are pinned by test to calculator.net's published output.
+
+The day's target then appears on Today as "eaten of target" with a
+progress bar, split across your meal sections weighted by how you
+actually eat in each. A macro budget (editable split, balanced 20/50/30
+default; fibre at 14 g/1000 kcal) sits beside it.
+
+**Weekly cycling** redistributes the same weekly total across the days
+using training load and the watch's sleep, HRV and stress against your
+own rolling baselines. The weekly total is conserved — cycling changes
+*when* calories fall, never *how many* — and every day carries a sentence
+naming which input moved it. Swing capped at ±20%; set it to 0 to keep a
+flat week. Cancelling a plan clears **today forward only**: what the
+target was on a logged day is part of that day's record.
+
+A manually set number outranks everything, per principle 8; the safety
+floor warns once and never clamps.
+
 ## 11. Diagnostics — the criteria, measured
 
 | # | Criterion | Measured as |
@@ -271,9 +296,12 @@ device; months of logs with no copy elsewhere is its own data-loss risk.
 
 Not built, though the schema accommodates them without migration:
 
-Garmin *API* sync · adaptive TDEE model · goals and targets · exercise
-logger · micronutrient UI · recommendation engine · templates beyond what
+Garmin *API* sync · adaptive TDEE model · exercise logger ·
+micronutrient UI · recommendation engine · templates beyond what
 `phrase_index` gives free · accounts · sync · sharing.
+
+Goal setting and calorie targets, originally out of scope, were put in
+scope by the owner and are built — see *Goal* below.
 
 Garmin **file import** is built (§10) because the owner asked for it; it
 needs no server and reuses the existing importer pattern. There is still

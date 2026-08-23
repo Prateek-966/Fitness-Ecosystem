@@ -291,6 +291,13 @@ export function writePlan(db: Db, plan: DayPlan[]): number {
   return plan.length;
 }
 
-export function clearPlan(db: Db): void {
-  db.run("DELETE FROM energy_target WHERE source = 'cycled'");
+/**
+ * Cancel the plan from a given day forward. Past days are kept: what the
+ * target WAS on a day you already logged is part of that day's record,
+ * and the eventual adaptive model reads intake against the target then in
+ * force. Cancelling a plan is a decision about the future, not an erasure
+ * of the past.
+ */
+export function clearPlan(db: Db, fromDate = localDate()): void {
+  db.run("DELETE FROM energy_target WHERE source = 'cycled' AND log_date >= ?", [fromDate]);
 }

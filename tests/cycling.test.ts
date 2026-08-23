@@ -5,8 +5,8 @@ import {
   DEFAULT_MAX_SWING, baselines, clearPlan, dayInputs, planDays, planWeek,
   scoreDay, writePlan, type Baselines, type DayInputs,
 } from '../src/core/cycling';
-import { activeTarget, macroBudget, rateForGoal, saveProfile, weightProgress,
-  writeTargets, type BodyProfile } from '../src/core/energy';
+import { activeTarget, estimateTargets, macroBudget, rateForGoal, saveProfile,
+  weightProgress, writeTargets, type BodyProfile } from '../src/core/energy';
 
 let db: Db;
 beforeEach(() => { db = freshDb(); });
@@ -222,10 +222,10 @@ describe('precedence', () => {
     expect(activeTarget(db, '2026-08-22')!.source).toBe('manual');
   });
 
-  it('clearing the plan falls back to the formula', () => {
+  it('clearing the plan from a day falls that day back to the formula', () => {
     writeTargets(db, MAN, '2026-08-22');
     writePlan(db, [{ logDate: '2026-08-22', kcal: 2222, weight: 1.1, reasons: [], basis: 'x' }]);
-    clearPlan(db);
+    clearPlan(db, '2026-08-22');
     expect(activeTarget(db, '2026-08-22')!.source).toBe('mifflin');
   });
 });
@@ -290,5 +290,60 @@ describe('weight goal', () => {
 
   it('returns null before any profile exists', () => {
     expect(weightProgress(db)).toBeNull();
+  });
+});
+
+// -----------------------------------------------------------------
+// Hardening pass regressions.
+// -----------------------------------------------------------------
+describe('cancelling a plan does not rewrite history', () => {
+  it('keeps past cycled days and removes only today forward', () => {
+    for (const d of ['2026-08-20', '2026-08-21', '2026-08-22', '2026-08-23']) {
+      writePlan(db, [{ logDate: d, kcal: 2100, weight: 1, reasons: [], basis: 'x' }]);
+    }
+    clearPlan(db, '2026-08-22');
+    const left = db.all<{ log_date: string }>(
+      "SELECT log_date FROM energy_target WHERE source = 'cycled' ORDER BY log_date");
+    // What the target WAS on a logged day is part of that day's record.
+    expect(left.map((r) => r.log_date)).toEqual(['2026-08-20', '2026-08-21']);
+  });
+});
+
+describe('the profile boundary rejects poisoned numbers', () => {
+  const P: BodyProfile = {
+    sex: 'male', ageYears: 30, heightCm: 180, weightKg: 80,
+    bodyFatPct: null, activityFactor: 1.465, goalRateKgPerWeek: -0.5,
+  };
+
+  it('throws on NaN rather than silently corrupting every future target', () => {
+    expect(() => saveProfile(db, { ...P, weightKg: NaN })).toThrow(/weight/);
+    expect(() => saveProfile(db, { ...P, ageYears: Infinity })).toThrow(/age/);
+    expect(() => saveProfile(db, { ...P, bodyFatPct: NaN })).toThrow(/body fat/);
+    expect(db.all('SELECT * FROM body_profile')).toHaveLength(0);
+  });
+
+  it('rejects a non-positive body', () => {
+    expect(() => saveProfile(db, { ...P, weightKg: 0 })).toThrow(/positive/);
+    expect(() => saveProfile(db, { ...P, heightCm: -170 })).toThrow(/positive/);
+  });
+
+  it('does not police ranges - the user\'s number is the number', () => {
+    expect(() => saveProfile(db, { ...P, ageYears: 200 })).not.toThrow();
+  });
+});
+
+describe('degenerate formulas emit nothing instead of nonsense', () => {
+  it('skips a formula whose BMR goes non-positive', () => {
+    // The regressions go negative far outside the fitted population.
+    // "Not applicable" beats a negative calorie target with an Infinity
+    // percent attached.
+    const est = estimateTargets({
+      sex: 'female', ageYears: 200, heightCm: 90, weightKg: 26,
+      bodyFatPct: null, activityFactor: 1.2, goalRateKgPerWeek: 0,
+    });
+    for (const e of est) {
+      expect(e.target).toBeGreaterThan(0);
+      expect(Number.isFinite(e.percentOfMaintenance)).toBe(true);
+    }
   });
 });

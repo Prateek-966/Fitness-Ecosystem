@@ -379,6 +379,58 @@ user-defined.
 
 ---
 
+## 13b. Energy targets — `src/core/energy.ts`
+
+Owner-authorised. BMR from the published equations (Mifflin-St Jeor,
+revised Harris-Benedict, Katch-McArdle — the last skipped without a
+measured body-fat figure rather than run on a guess), scaled by an
+activity factor, shifted by the goal rate at **7000 kcal/kg**.
+
+Two constants here are *calculator.net's*, not the classical ones, and a
+test pins all seven of that site's published figures so they cannot
+drift: the "moderate" multiplier is **1.465** (not the Harris-Benedict
+1.55), and 1 kg/week maps to exactly 1000 kcal/day.
+
+Targets follow the `session_energy` pattern — one `energy_target` row per
+source, none averaged — with precedence deliberately inverted:
+measurements let the best instrument win; decisions let the user win
+(`manual` → `cycled` → `adaptive` → formulas). `saveProfile()` rejects
+non-finite numbers at the boundary (a NaN weight would silently poison
+every future target) but does not police ranges: the user's number is the
+number. A formula whose BMR goes non-positive on far-out-of-population
+inputs emits nothing rather than a negative target.
+
+Macro budgets use Atwater factors over an editable split; a split that
+does not sum to 100 is **reported, not repaired**. Fibre scales at
+14 g/1000 kcal. `weightProgress()` reads start and current weight off the
+append-only profile history rather than keeping a separate start field
+that would eventually disagree with it.
+
+## 13c. Calorie cycling — `src/core/cycling.ts`
+
+Redistributes `dailyTarget × 7` across the week using training load
+(`v_session_energy`) and the watch's sleep, HRV and stress
+(`v_daily_metric`) against the user's **own 28-day rolling baselines**.
+
+A transparent weighted sum, not a model: each day carries a sentence
+naming which input moved it and by how much, so a suggestion can be
+argued with. Signal directions — training up → eat more; short sleep,
+suppressed HRV, high stress → ease the deficit — are stated as tests so
+they cannot drift. A missing metric contributes *nothing*: a watch on the
+charger is not an average night.
+
+Invariants, all asserted: the weekly total is conserved to rounding
+(clamp to ±`max_cycle_swing`, redistribute the remainder among unclamped
+days until it settles); the safety floor is the one thing allowed to
+raise the total, and the caller is told; `maxSwing: 0` reduces to a flat
+week; `clearPlan()` removes **today forward only**, because what the
+target was on a logged day is part of that day's record.
+
+Honest limits: that training days need more fuel is uncontroversial; that
+HRV and sleep should modulate intake is plausible and widely practised
+but **not established** to beat a flat deficit — hence gentle weights, a
+cap, and an off switch.
+
 ## 14. Totals and error propagation
 
 `v_daily_totals` sums only `status = 'resolved'` rows and combines errors

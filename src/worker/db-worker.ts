@@ -66,6 +66,8 @@ function snapshot(): Snapshot {
 
 /** Everything goal-related, assembled once so the UI gets it in one hop. */
 function goalSnapshot(date: string) {
+  // One read of the active target, reused throughout - this runs inside
+  // every snapshot, including the one on the capture path.
   const target = activeTarget(db, date);
   const s = allSettings(db);
   return {
@@ -239,10 +241,13 @@ async function handle(req: Request): Promise<unknown> {
     }
 
     case 'clearPlan':
-      clearPlan(db);
+      // Today forward only. What the target WAS on a logged day is part
+      // of that day's record.
+      clearPlan(db, localDate());
       return snapshot();
 
     case 'logWater': {
+      if (!Number.isFinite(req.glasses)) return snapshot();
       db.run(
         `INSERT INTO daily_metric (log_date, metric, source, value, recorded_at)
          VALUES (?, 'water_glasses', 'manual', ?, ?)

@@ -172,11 +172,13 @@ db/             schema.sql (given, plus additive v0 tables) and seed.sql
 - [x] `daily_logging_stats` populated nightly
 - [x] `match_score` logged on every entry from day one, plus a full `match_audit`
 
-**Not built, by design:** Garmin ingestion, the adaptive TDEE model, goals
-and targets, the exercise logger, micronutrient UI, any recommendation
-engine. The schema accommodates all of them — `workout_session`,
-`session_energy` and the precedence view are already there, unused — so
-none of it needs a migration.
+**Built later, owner-authorised:** Garmin file import (activities and
+wellness), goal setting with side-by-side formula estimates pinned to
+calculator.net's output, macro budgets, per-meal targets weighted by your
+own history, and weekly calorie cycling that conserves the weekly total.
+
+**Still not built, by design:** Garmin *API* sync, the adaptive TDEE
+model, the exercise logger, micronutrient UI, any recommendation engine.
 
 ---
 

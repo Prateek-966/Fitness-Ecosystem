@@ -154,7 +154,13 @@ export function estimateTargets(p: BodyProfile): TargetEstimate[] {
   for (const source of ['mifflin', 'harris', 'katch'] as const) {
     const basal = bmr(p, source);
     if (basal === null) continue;          // Katch without a body-fat figure
+    // The regressions go negative outside the population they were fitted
+    // on. A negative resting expenditure is not an estimate, it is the
+    // formula saying "not applicable" - so treat it exactly like Katch
+    // without a body-fat figure and emit nothing.
+    if (basal <= 0) continue;
     const maintenance = tdee(basal, p.activityFactor);
+    if (maintenance <= 0) continue;
     const target = round(maintenance + delta);
     out.push({
       source,
@@ -199,6 +205,24 @@ export function safetyCheck(p: BodyProfile, target: number): SafetyNote {
 // ------------------------------------------------------------------
 
 export function saveProfile(db: Db, p: BodyProfile): number {
+  // A NaN or Infinity here would flow silently into every target the app
+  // computes from now on, while the form looks saved. Reject loudly at
+  // the boundary instead. RANGES are not checked - principle 8 says the
+  // user's number is the number - only that each one is a real number.
+  const finite: Array<[string, number | null | undefined]> = [
+    ['age', p.ageYears], ['height', p.heightCm], ['weight', p.weightKg],
+    ['activity factor', p.activityFactor], ['goal rate', p.goalRateKgPerWeek],
+    ['body fat', p.bodyFatPct], ['goal weight', p.goalWeightKg],
+  ];
+  for (const [label, v] of finite) {
+    if (v !== null && v !== undefined && !Number.isFinite(v)) {
+      throw new Error(`${label} is not a number`);
+    }
+  }
+  if (p.weightKg <= 0 || p.heightCm <= 0) {
+    throw new Error('height and weight must be positive');
+  }
+
   // Append-only: weight moves, and recomputing today's target must not
   // silently rewrite what last month's target was.
   return db.run(
