@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { loadConfig, tokenMatches } from '../src/config.ts';
 import { SyncStore } from '../src/store.ts';
@@ -399,5 +399,48 @@ describe('with no SYNC_TOKEN the app is served and the API is off', () => {
   it('still serves the application', async () => {
     // The whole point: food logging does not depend on Garmin config.
     expect((await fetch(`${base}/`)).status).toBe(200);
+  });
+});
+
+// -----------------------------------------------------------------
+// What reaches the host's log stream.
+// -----------------------------------------------------------------
+describe('secrets and measurements never reach the logs', () => {
+  // Render retains a log stream that is readable from the dashboard.
+  // Nothing in it should be a password, a bearer token, or a number
+  // describing the person. Sync failures are stored in the database and
+  // served over the authenticated API instead.
+
+  /**
+   * What a template interpolation can actually put into the output.
+   * A ternary emits only its branches — its condition is a presence
+   * check, which is exactly what `syncApi=${cfg.syncToken ? … : …}` is
+   * for — and a string literal cannot carry a value.
+   */
+  const emitted = (expr: string) =>
+    expr.replace(/[^?:]+\?/g, '').replace(/'[^']*'/g, "''");
+
+  const interpolations = (src: string) =>
+    [...src.matchAll(/console\.(log|warn|error)\(([\s\S]*?)\);/g)]
+      .flatMap((m) => [...m[2].matchAll(/\$\{([^}]+)\}/g)].map((i) => i[1]));
+
+  const SECRET = /password|syncToken|\.email|access_token/i;
+
+  it('still catches a secret that is logged for its value', () => {
+    // Otherwise this file is a test that looks like a guard and is not.
+    expect(emitted('cfg.syncToken')).toMatch(SECRET);
+    expect(emitted("cfg.garmin ? cfg.garmin.password : 'none'")).toMatch(SECRET);
+  });
+
+  it('logs no credential value and no health value', () => {
+    const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    for (const expr of interpolations(src)) {
+      expect(emitted(expr), `logged expression: ${expr}`).not.toMatch(SECRET);
+    }
+  });
+
+  it('reports credentials as present or absent, never their value', () => {
+    const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/garminCredentials=\$\{cfg\.garmin \? 'set' : 'missing'\}/);
   });
 });
