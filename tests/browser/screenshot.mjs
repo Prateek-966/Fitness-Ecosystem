@@ -160,6 +160,16 @@ const shots = {
   measures: 'nav.tabs button:has-text("Measures")',
   diagnostics: 'nav.tabs button:has-text("Diagnostics")',
 };
+// The toast sits over the content for a couple of seconds after the
+// last action, and a screenshot taken through it shows a transient
+// notice covering a row that is meant to be readable. Wait it out
+// rather than timing the capture and hoping.
+// toast.ts flips data-show to '0' when it retires itself.
+await p.waitForFunction(
+  () => document.getElementById('toast')?.dataset.show !== '1',
+  { timeout: 10000 },
+).catch(() => {});
+
 for (const [name, selector] of Object.entries(shots)) {
   await p.click(selector);
   await p.waitForTimeout(400);
