@@ -669,3 +669,185 @@ LEFT JOIN food f ON f.id = ma.chosen_food_id
 WHERE ma.score IS NOT NULL
 ORDER BY ABS(ma.score - ma.threshold) ASC;
 
+
+
+-- ------------------------------------------------------------
+-- 17. MEALS AS ENTITIES
+--
+-- "My usual dinner" is a thing the owner thinks in, and until now the
+-- app had no noun for it: meal_slot_window knows WHEN you eat, never
+-- WHAT. Without this, a question like "when I eat this dinner, how does
+-- my sleep look" has no subject.
+--
+-- Two origins, and the distinction is kept rather than merged:
+--   'saved'      -> you named this combination yourself.
+--   'recognised' -> the app noticed you eat it repeatedly.
+-- A recognised meal you then rename becomes saved, because you have
+-- taken ownership of it and it must stop being re-derived underneath
+-- you. Same reasoning as auto_learn_threshold: something the app
+-- inferred and something you asserted are not the same fact.
+--
+-- Occurrences are NOT stored. Which days a meal was eaten is derived by
+-- matching log_entry against the components at read time, so it cannot
+-- drift out of agreement with the log the way a cached table would.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS meal (
+    id              INTEGER PRIMARY KEY,
+    name            TEXT    NOT NULL,
+    -- Nullable: a meal you eat at no fixed time is still a meal.
+    slot            TEXT    CHECK (slot IS NULL OR
+                          slot IN ('breakfast','lunch','snack','dinner')),
+    origin          TEXT    NOT NULL CHECK (origin IN ('saved','recognised')),
+    created_at      TEXT    NOT NULL,
+    -- How many times the app has seen this combination. For a saved
+    -- meal this starts at 0 and is still counted, so "I save it but
+    -- never eat it" is visible rather than hidden.
+    n_observations  INTEGER NOT NULL DEFAULT 0,
+    last_seen_at    TEXT
+);
+
+-- One row per food in the meal. Quantity is optional: "my usual
+-- breakfast is eggs and toast" is a useful fact even before you say how
+-- many, and demanding a number would make saving one a chore.
+CREATE TABLE IF NOT EXISTS meal_component (
+    meal_id         INTEGER NOT NULL REFERENCES meal(id) ON DELETE CASCADE,
+    food_id         INTEGER NOT NULL REFERENCES food(id),
+    quantity        REAL,
+    unit_id         INTEGER REFERENCES unit(id),
+    PRIMARY KEY (meal_id, food_id)
+);
+
+-- A meal is identified by its SET of foods, so the same combination
+-- cannot be recognised twice under two names. Expression index rather
+-- than a plain UNIQUE for the usual reason - see section 16.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_meal_identity
+    ON meal (LOWER(name), COALESCE(slot, ''));
+
+
+-- ------------------------------------------------------------
+-- 18. SATIETY
+--
+-- OWNER-AUTHORISED EXCEPTION TO PRINCIPLE 8 ("never nag").
+--
+-- The app asks, after a meal, how full you are. It was offered the
+-- passive alternatives - infer satiety from the gap to the next meal,
+-- or put an unprompted control next to the entry - and chose to be
+-- asked, knowing that principle 8 says this application does not
+-- prompt. That is recorded here and in CLAUDE.md so it is not later
+-- "fixed" by someone enforcing the principle in good faith.
+--
+-- The prompt is bounded by what remains of the principle: it is a
+-- setting, it can be switched off, it asks once per meal occasion and
+-- never repeats, and it cannot block or delay a capture.
+--
+-- Fullness is 1..5 and deliberately coarse. Nobody can tell 6/10 from
+-- 7/10 about their own stomach, and a scale that implies they can
+-- produces confident noise.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS satiety_rating (
+    id              INTEGER PRIMARY KEY,
+    -- The meal occasion being rated: the local timestamp of its first
+    -- entry, which is what groups a meal in every other query here.
+    eaten_at        TEXT    NOT NULL,
+    slot            TEXT,
+    fullness        INTEGER NOT NULL CHECK (fullness BETWEEN 1 AND 5),
+    rated_at        TEXT    NOT NULL,
+    -- How long after the meal the rating was given. The question is
+    -- "what keeps me full LONGEST", so when it was asked is part of
+    -- the measurement, not metadata about it.
+    minutes_after   REAL,
+    -- 'prompted' -> the app asked. 'volunteered' -> you opened it.
+    -- A prompted answer and a spontaneous one have different selection
+    -- bias, and averaging them without knowing which is which would
+    -- hide that.
+    basis           TEXT    NOT NULL DEFAULT 'prompted'
+                    CHECK (basis IN ('prompted','volunteered'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_satiety_occasion
+    ON satiety_rating (eaten_at, COALESCE(slot, ''));
+
+
+-- ------------------------------------------------------------
+-- 19. THE LEARNING LOOP
+--
+-- Observe -> explain -> predict -> propose -> act -> measure -> LEARN.
+-- Everything before the last step is a report. This table is what makes
+-- it a loop, and it is the only part of the intelligence that can tell
+-- the difference between advice that works and advice that merely
+-- sounds right.
+--
+-- The mechanism is falsifiability, not cleverness. A proposal is only
+-- recorded here if it commits to a NUMBER and a DATE: "hold intake and
+-- the rate should return to -0.4 kg/week within 21 days". When that
+-- date arrives the same measurement is taken again and the proposal is
+-- marked worked / did_not / inconclusive. A proposal that predicts
+-- nothing checkable is advice, and advice is not stored here.
+--
+-- 'inconclusive' is a first-class verdict and will be the most common
+-- one. You did not adopt it; you adopted it and something else changed
+-- at the same time; the data ran out. Recording those as failures would
+-- teach the system the wrong lesson faster than it learns any right
+-- one.
+--
+-- What the record is USED for is deliberately modest: it downgrades the
+-- stated confidence of a kind of advice that has not worked for this
+-- person before. It does not silently rewrite the rules. An app whose
+-- thesis is provenance cannot start tuning itself invisibly.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS decision_log (
+    id              INTEGER PRIMARY KEY,
+    issued_at       TEXT    NOT NULL,
+    kind            TEXT    NOT NULL,
+    headline        TEXT    NOT NULL,
+    -- The working, as issued. JSON array of strings. Kept verbatim so a
+    -- verdict six months from now still shows what was believed at the
+    -- time, not what the rules would say today.
+    because         TEXT    NOT NULL,
+    confidence      TEXT    NOT NULL,
+
+    -- The falsifiable commitment. Null for advice that predicts nothing
+    -- measurable, which is never written to this table.
+    predicted_metric TEXT   NOT NULL,
+    predicted_value  REAL   NOT NULL,
+    horizon_days     INTEGER NOT NULL,
+    -- What the measurement said when the proposal was made, so the
+    -- verdict compares a change rather than an absolute.
+    baseline_value   REAL,
+
+    -- Filled in by the user: did you actually do it? Null means unknown,
+    -- and unknown is not the same as no.
+    adopted         INTEGER CHECK (adopted IS NULL OR adopted IN (0,1)),
+    acted_at        TEXT,
+
+    -- Filled in by evaluation, once the horizon has passed.
+    evaluated_at    TEXT,
+    observed_value  REAL,
+    verdict         TEXT CHECK (verdict IS NULL OR
+                        verdict IN ('worked','did_not','inconclusive')),
+    verdict_basis   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_due
+    ON decision_log (issued_at) WHERE verdict IS NULL;
+
+-- One open proposal of a kind at a time. Issuing "cut 250 kcal" every
+-- day for a week would produce seven proposals, six of which are the
+-- same one restated, and a track record made of duplicates says
+-- nothing.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_decision_open
+    ON decision_log (kind) WHERE verdict IS NULL;
+
+-- What the advice layer reads to decide how much to trust itself.
+DROP VIEW IF EXISTS v_advice_track_record;
+CREATE VIEW v_advice_track_record AS
+SELECT
+    kind,
+    COUNT(*)                                              AS n_evaluated,
+    SUM(CASE WHEN verdict = 'worked'  THEN 1 ELSE 0 END)  AS n_worked,
+    SUM(CASE WHEN verdict = 'did_not' THEN 1 ELSE 0 END)  AS n_did_not,
+    SUM(CASE WHEN verdict = 'inconclusive' THEN 1 ELSE 0 END) AS n_inconclusive,
+    MAX(evaluated_at)                                     AS last_evaluated_at
+FROM decision_log
+WHERE verdict IS NOT NULL
+GROUP BY kind;

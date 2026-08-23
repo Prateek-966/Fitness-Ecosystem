@@ -406,3 +406,106 @@ SELECT u.id,
        END AS outcome
 FROM utterance u;
 ```
+
+## 17. `meal`, `meal_component` — meals as entities
+
+"My usual dinner" is a thing the owner thinks in, and until this section
+the app had no noun for it. `meal_slot_window` (section 13) knows *when*
+you eat; it never knew *what*. Without a meal entity, a question like
+"when I eat this dinner, how does my sleep look" has no subject.
+
+| Column | Note |
+|---|---|
+| `meal.name` | Yours. Free text. |
+| `meal.slot` | Nullable — a meal you eat at no fixed time is still a meal. |
+| `meal.origin` | `saved` = you named it. `recognised` = the app noticed it recurring. |
+| `meal.n_observations` | Counted for saved meals too, so "I saved it and never ate it" is visible. |
+| `meal_component.quantity` | Optional. "Eggs and toast" is useful before you say how many, and demanding a number makes saving one a chore. |
+
+`origin` is kept rather than merged for the same reason
+`auto_learn_threshold` is separate from `fuzzy_threshold`: something the
+app inferred and something you asserted are not the same fact. Renaming
+a recognised meal makes it `saved`, because you have taken ownership and
+it must stop being re-derived underneath you.
+
+**Occurrences are deliberately not stored.** Which days a meal was eaten
+is derived by matching `log_entry` against the components at read time,
+so it cannot drift out of agreement with the log the way a cached table
+would.
+
+`ux_meal_identity` on `(LOWER(name), COALESCE(slot,''))` stops the same
+combination being recognised twice under two names. Expression index
+rather than plain UNIQUE, for the reason in section 16.
+
+## 18. `satiety_rating` — how full, and how long after
+
+**This is an owner-authorised exception to principle 8 ("never nag").**
+The app asks, after a meal, how full you are. The passive alternatives —
+infer satiety from the gap to the next meal, or offer an unprompted
+control next to the entry — were both put to the owner, who chose to be
+asked, knowing the principle says this application does not prompt.
+Recorded here and in `CLAUDE.md` so it is not later "fixed" by someone
+enforcing the principle in good faith.
+
+What remains of the principle still binds it: prompting is a setting, it
+can be switched off (`satiety_prompt = off` restores the principle
+exactly), it asks once per meal occasion and never repeats, and it can
+never block or delay a capture.
+
+| Column | Note |
+|---|---|
+| `eaten_at` | The occasion rated — the local timestamp of its first entry, which is what groups a meal everywhere else. |
+| `fullness` | 1–5, deliberately coarse. Nobody can tell 6/10 from 7/10 about their own stomach, and a finer scale produces confident noise. |
+| `minutes_after` | The question is what keeps you full *longest*, so when it was asked is part of the measurement. |
+| `basis` | `prompted` or `volunteered`. Different selection bias; averaging them without knowing which is which would hide that. |
+
+`ux_satiety_occasion` on `(eaten_at, COALESCE(slot,''))` is what makes
+"ask once per occasion" an invariant rather than a hope.
+
+### Settings added with these
+
+| Key | Default | Meaning |
+|---|---|---|
+| `satiety_prompt` | `on` | `off` restores principle 8 exactly. |
+| `satiety_prompt_min` | `150` | Minutes after a meal to ask. Long enough that the answer is about the meal, not about having just eaten. |
+| `satiety_prompt_ttl_min` | `120` | Stop asking after this. A question nobody answers is a notification badge. |
+| `meal_recognise_min` | `3` | How many times a combination must recur before it is named as a meal of yours. |
+
+## 19. `decision_log`, `v_advice_track_record` — the learning loop
+
+Observe → explain → predict → propose → act → measure → **learn**.
+Everything before the last step is a report. This table is what makes it
+a loop, and it is the only part of the intelligence that can tell advice
+that works from advice that merely sounds right.
+
+The mechanism is falsifiability, not cleverness. A proposal reaches this
+table only if it commits to a **number** and a **date** — "hold intake
+and the rate should return to −0.4 kg/week within 21 days". When the
+date arrives the same measurement is taken again and the row is marked.
+Advice that predicts nothing checkable is never written here, because a
+track record made of unfalsifiable claims is decoration.
+
+| Column | Note |
+|---|---|
+| `because` | JSON array, verbatim as issued. A verdict six months from now must show what was believed *then*, not what the rules would say today. |
+| `predicted_metric` / `predicted_value` / `horizon_days` | The commitment. All NOT NULL — there is no such thing as a row here without one. |
+| `baseline_value` | What the measurement said when the proposal was made, so a verdict compares a *change*. |
+| `adopted` | Nullable, and null means **unknown, not no**. |
+| `verdict` | `worked` / `did_not` / `inconclusive`. |
+
+**`inconclusive` is first-class and will be the most common verdict.**
+You did not adopt it; you adopted it and something else changed at the
+same time; the data ran out. Recording those as failures would teach the
+system the wrong lesson faster than it learns any right one.
+
+`ux_decision_open` — one open proposal per kind — stops the app
+manufacturing a track record out of the same advice restated on each
+launch. `idx_decision_due` is the partial index the evaluator scans.
+
+`v_advice_track_record` is what the advice layer reads to decide how
+much to trust itself. It only ever **downgrades** confidence: advice
+that has repeatedly failed for this person is evidence about this
+person, while advice that happened to work three times is what chance
+looks like at that sample size. It never silently rewrites the rules —
+an application whose thesis is provenance cannot start tuning itself
+invisibly.

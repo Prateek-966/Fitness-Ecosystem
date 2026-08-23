@@ -40,6 +40,12 @@ has tests that fail if broken. **Do not "improve" them without asking.**
    inventing grams.
 8. **Default permissive, surface consequences, never block.** Never
    refuse, never nag, never clamp a value the user set.
+   **One authorised exception:** the satiety prompt asks, after a meal,
+   how full you are. The owner was offered both passive alternatives and
+   chose to be asked, knowing what this principle says. It is bounded —
+   a setting, off-able, once per occasion, never blocking a capture —
+   and `satiety_prompt = off` restores the principle exactly. **Do not
+   remove it as a violation.**
 9. **Store every estimate, sum none.** One row per source; precedence is
    a *read-time* decision in a view.
 
@@ -61,7 +67,13 @@ has tests that fail if broken. **Do not "improve" them without asking.**
   the server the way the Dockerfile does — that is the only tier that
   catches this class of bug.
 - **A missing measurement is missing, never zero.** A watch on the
-  charger did not record zero steps.
+  charger did not record zero steps. The same trap in aggregate: a day
+  you did not log is not a day you ate nothing, so `insights.ts`
+  averages over logged days only — counting gaps as zeros makes every
+  missed day look like restraint.
+- **The canonical energy nutrient key is `kcal`, not `energy_kcal`.**
+  `foodimport.ts` normalises every spelling onto it. Using another name
+  in a query returns no rows rather than failing, which is worse.
 - **CSP blocks inline `style` attributes.** `h()` routes styles through
   CSSOM; a test fails if a `style=` attribute reappears.
 
@@ -116,8 +128,20 @@ Do not add them without the owner asking:
 - Any ML model, LLM call, or network request on the capture path.
 - Onboarding, auth, multi-tenancy, analytics, subscription scaffolding.
 - Nudges or prompts to eat. Principle 8 says never nag.
-- A recommendation engine.
 - Hard-coded meal times. They are clustered from the user's own logs.
+
+**Asked for, and therefore built** — do not remove these as scope creep:
+
+- **A recommendation engine** (`src/core/advice.ts`). The owner asked
+  directly. It is a transparent rule set over facts already in the
+  database — no model, no network — and every recommendation carries the
+  figures that produced it. An application whose claim is honesty about
+  provenance cannot emit its most consequential output from a black box.
+  It should be **replaced, not extended**, once the adaptive TDEE model
+  can answer the maintenance question properly.
+- **The satiety prompt.** See principle 8 above.
+- **Meals as entities** (`meal`, `meal_component`), both recognised from
+  your logs and saved by hand.
 
 The single largest risk to this project is scope creep, and the brief
 says it has already happened once.

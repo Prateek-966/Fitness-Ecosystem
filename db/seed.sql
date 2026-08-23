@@ -56,3 +56,18 @@ INSERT OR IGNORE INTO app_setting (key, value) VALUES
     ('water_goal_glasses',   '8'),
     ('steps_goal',           '10000'),
     ('max_cycle_swing',      '0.2');
+
+INSERT OR IGNORE INTO app_setting (key, value) VALUES
+    -- Satiety prompting. See schema.sql section 18: this is an
+    -- owner-authorised exception to principle 8, and 'off' restores the
+    -- principle exactly.
+    ('satiety_prompt',        'on'),
+    -- How long after a meal to ask. Long enough that the answer is
+    -- about the meal rather than about having just eaten.
+    ('satiety_prompt_min',    '150'),
+    -- Stop asking if it goes unanswered this long; a question nobody
+    -- answers is just a notification badge.
+    ('satiety_prompt_ttl_min', '120'),
+    -- How many times a food combination must recur before the app
+    -- names it as a meal of yours.
+    ('meal_recognise_min',    '3');

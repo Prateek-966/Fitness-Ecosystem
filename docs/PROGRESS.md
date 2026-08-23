@@ -54,6 +54,13 @@ automation, not the data.
 | **Goal setting** (Mifflin / Harris / Katch) | done, owner-authorised |
 | Macro budget, water, steps, goal weight | done |
 | **Weekly calorie cycling** from watch metrics | done |
+| **Cross-day insights** (weight trend, week profile, training-day intake, nutrient habits, revealed preference) | done |
+| **Decision layer** — "what should I do right now" | done, owner-authorised |
+| Projection with honest intervals (stage 3) | done |
+| **The learning loop** (`decision_log`, stage 5) | done |
+| Food-to-sleep/stress association, on request | done |
+| Meals as entities (`meal`, `meal_component`) | schema done, logic pending |
+| Satiety capture | schema done, logic pending |
 | **Garmin file import** (activities + wellness) | done |
 | **Garmin auto-sync server** | done — *see §4* |
 | Garmin login rewritten against working references | done |
@@ -176,6 +183,9 @@ Roughly in priority order. None of these are started.
 **Core logic** (`src/core/`, pure, no DOM):
 `parse` · `similarity` · `resolve` · `mealslot` · `stats` · `totals` ·
 `energy` (BMR/targets/macros) · `cycling` (weekly redistribution) ·
+`insights` (cross-day aggregation, trends, projection) ·
+`advice` (the decision layer) · `learn` (the feedback loop) ·
+`reactions` (food-to-metric association) ·
 `garmin` (file import) · `sync` (server client) · `healthify` ·
 `foodimport` · `settings` · `clock` · `timing` · `csv` · `db`
 
