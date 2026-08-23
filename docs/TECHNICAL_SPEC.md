@@ -466,8 +466,10 @@ database picks up new indexes without a migration runner.
 
 ## 16. Security posture
 
-There is no server, no account and no third-party request; the realistic
-threat is a future code change that leaks a database full of health data.
+The app itself makes exactly one outbound request, to its own origin.
+There is one server, holding a Garmin credential and a rolling window;
+the realistic threats are a code change that leaks a database full of
+health data, and an unauthenticated sync API.
 
 | Control | Where |
 |---|---|
@@ -478,7 +480,11 @@ threat is a future code change that leaks a database full of health data.
 | Path traversal guard | the test static server normalises then re-checks the root |
 | `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, restrictive `Permissions-Policy` | `render.yaml` |
 | `sw.js` `no-cache` | a cached service worker can never update itself again |
-| Dependencies | `npm audit` clean |
+| Dependencies | `npm audit` clean; the server has **zero** dependencies (node:http + node:sqlite only) |
+| `SYNC_TOKEN` required, no default | the service refuses to start without one; constant-time comparison; 401 reveals nothing |
+| Sync credential in `app_secret`, not `app_setting` | the UI snapshot carries every setting; a test asserts the token never appears there |
+| Server responses validated before reaching the DB | unknown metric keys, NaN and malformed dates dropped, so schema guarantees do not depend on the server being correct |
+| Container runs as non-root, with a healthcheck | it holds a credential; it does not also need the filesystem |
 
 ---
 

@@ -4,6 +4,8 @@ Start here if you have never seen this project.
 
 | Document | Read it for |
 |---|---|
+| **[PROGRESS.md](PROGRESS.md)** | **Start here.** Where the project actually stands: what is built, what is not, decisions not worth re-litigating, known limitations, and what to do next. |
+| **[../CLAUDE.md](../CLAUDE.md)** | Orientation for anyone (or anything) picking this up cold: the non-negotiables, the lessons this codebase already paid for, and what is deliberately absent. |
 | **[BUILD_BRIEF.md](BUILD_BRIEF.md)** | The original spec. Why the product exists, the nine design principles, what is in and out of scope. **The source of intent** — everything else serves it. |
 | **[FUNCTIONAL_SPEC.md](FUNCTIONAL_SPEC.md)** | What the app does, from the outside. Screens, flows, edge cases, acceptance criteria. |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | How it is put together. Layers, the worker boundary, the capture path, where each principle is enforced. |
@@ -12,6 +14,8 @@ Start here if you have never seen this project.
 | **[../README.md](../README.md)** | Running it, deploying it, and the decisions that need the owner's sign-off. |
 
 ## Suggested order
+
+**Coming back after a gap:** PROGRESS, then CLAUDE.md.
 
 **To understand the product:** BUILD_BRIEF → FUNCTIONAL_SPEC.
 

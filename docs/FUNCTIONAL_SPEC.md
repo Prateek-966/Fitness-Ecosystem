@@ -304,8 +304,10 @@ Goal setting and calorie targets, originally out of scope, were put in
 scope by the owner and are built — see *Goal* below.
 
 Garmin **file import** is built (§10) because the owner asked for it; it
-needs no server and reuses the existing importer pattern. There is still
-no UI reading those metrics back beyond a coverage summary — the brief
+reuses the existing importer pattern. Garmin **auto-sync** is also built
+(owner requirement): a server signs in on a schedule and the app collects
+what it found, through the same import path. There is still no UI reading
+those metrics back beyond a coverage summary — the brief
 puts sleep/HRV/stress displays out of scope until there is a model to
 feed.
 

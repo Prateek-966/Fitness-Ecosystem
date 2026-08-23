@@ -1,7 +1,7 @@
 # Architecture
 
-> A personal nutrition log. Speak a meal, it is logged. Everything runs on
-> one device, in one browser, with no server and no account.
+> A personal nutrition log. Speak a meal, it is logged. Your data lives in
+> your own browser; a small server exists only to fetch from Garmin.
 
 This document explains **how the system is put together and why**. For what
 it does, see [FUNCTIONAL_SPEC.md](FUNCTIONAL_SPEC.md). For how each
@@ -12,14 +12,30 @@ model, see [SCHEMA.md](SCHEMA.md).
 
 ## 1. The shape of the thing
 
-There is no backend. The entire application is a folder of static files;
-the "database server" is SQLite compiled to WebAssembly, running inside the
-user's own browser, persisting to that browser's origin-private filesystem
-(OPFS).
+**The browser is the store of record.** The database is SQLite compiled
+to WebAssembly, running inside the user's own browser and persisting to
+that browser's origin-private filesystem (OPFS). No account, no rows
+belonging to anyone else.
+
+There is now **one server**, and it earns its place narrowly: auto-pull
+from Garmin needs an OAuth client secret and a webhook endpoint, and a
+browser page can hold neither. So a small service holds the credential,
+pulls on a schedule, and keeps a rolling 90-day window for the app to
+collect. It is a **fetcher, not a store of record** — delete it and you
+lose the automation, not the data.
+
+It serves the built app *and* the sync API from **one origin**. A
+separate API host would need CORS and a widened `connect-src`, and every
+widening of a CSP on a page holding months of health data is a door
+someone has to remember to keep shut.
+
+> The app was a pure static site until auto-pull was made a requirement.
+> That history is why so much of it assumes no network — and why the app
+> still works completely with the server switched off, via file import.
 
 ```mermaid
 flowchart LR
-  subgraph device["One phone or laptop — nothing leaves it"]
+  subgraph device["Your phone or laptop — the store of record"]
     subgraph main["Main thread"]
       UI["UI<br/>views, mic, toast"]
       STT["Web Speech API"]
@@ -30,18 +46,25 @@ flowchart LR
     end
     OPFS[("OPFS<br/>nutrition.sqlite3")]
   end
-  HOST["Static host<br/>(HTML/JS/WASM only)"]
+  subgraph host["Sync server — same origin"]
+    APP["serves the built app"]
+    API["/api/garmin/*<br/>token-authenticated"]
+    POLL["poller<br/>holds credentials"]
+  end
+  GARMIN[("Garmin Connect")]
 
   STT --> UI
   UI <-->|"postMessage<br/>one round trip"| CORE
   CORE --> SQL --> OPFS
-  HOST -.->|"first load only"| main
+  APP -.->|"first load only"| main
+  UI -->|"collect, same origin"| API
+  POLL --> GARMIN
 ```
 
-The static host serves code and never sees data. There is no API to call,
-no token to leak, no row that belongs to anyone else. This is not a
-privacy feature bolted on; it is the cheapest way to build the product,
-and the privacy follows for free.
+Everything except the Garmin fetch happens on the device. The server sees
+Garmin's data in transit and holds a credential for it; it never sees the
+food log, and it stores no history. That trade was made explicitly and
+only because auto-pull is impossible without it.
 
 ---
 
@@ -254,6 +277,7 @@ Three tiers, each testing what only it can:
 | **Unit** (~105) | `npm test` | All of `src/core` against `node:sqlite`. Run **twice**, `TZ=UTC` and `TZ=Asia/Kolkata`. |
 | **Browser** (13) | `npm run test:browser` | sqlite-wasm, OPFS persistence across reload, the real UI, CSP, backup bytes. |
 | **Hosted** | `npm run test:hosted` | The built `dist/` served by a dumb static server — no rewrites, MIME table only — plus service-worker registration. |
+| **Sync** | `npm run test:sync` | Boots the real server exactly as the Dockerfile does and drives the app against it over a socket. The only tier that catches production-runtime bugs. |
 
 The third tier exists because `vite preview` is friendlier than a real host
 and will hide problems a static host would not.

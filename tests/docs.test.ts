@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULTS } from '../src/core/settings';
 import { DEFAULT_REL_ERROR } from '../src/core/foodimport';
@@ -143,6 +143,86 @@ describe('the docs do not disclaim built features', () => {
   it('SCHEMA documents the target precedence including cycled', () => {
     for (const source of ['manual', 'cycled', 'adaptive', 'mifflin', 'harris', 'katch']) {
       expect(SCHEMA_MD).toContain(source);
+    }
+  });
+});
+
+// -----------------------------------------------------------------
+// The orientation files exist to stop a cold session hallucinating.
+// They are only useful if they stay true.
+// -----------------------------------------------------------------
+describe('the memory bank stays accurate', () => {
+  const CLAUDE_MD = read('CLAUDE.md');
+  const PROGRESS = read('docs/PROGRESS.md');
+
+  it('names every top-level source area, so nothing is invisible', () => {
+    for (const dir of ['src/core', 'src/app', 'src/worker', 'src/platform', 'server/', 'db/', 'scripts/']) {
+      expect(CLAUDE_MD, dir).toContain(dir);
+    }
+  });
+
+  /**
+   * Scoped to the module map, not the whole file. Searching the whole
+   * document passes on any incidental mention - "cycling" appears in a
+   * feature table too - which makes the guard look like it works while
+   * catching nothing.
+   */
+  const moduleMap = PROGRESS.slice(PROGRESS.indexOf('## 6. Where things live'));
+
+  it('lists every core module in the module map', () => {
+    // A module absent from the map is one a fresh session will reinvent.
+    const modules = readdirSync(new URL('../src/core', import.meta.url))
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => f.replace('.ts', ''));
+    expect(modules.filter((m) => !moduleMap.includes(`\`${m}\``))).toEqual([]);
+  });
+
+  it('lists every server module in the module map', () => {
+    const modules = ['index', 'config', 'store', 'poller']
+      .map((m) => `\`${m}\``)
+      .concat(['garmin/{client,connect,fake}']);
+    expect(modules.filter((m) => !moduleMap.includes(m))).toEqual([]);
+  });
+
+  it('states the non-negotiables that have tests behind them', () => {
+    for (const phrase of [
+      'Capture never blocks',
+      'Ambiguous',
+      'excluded, never zeroed',
+      'provenance',
+      'append-only',
+      'Store every estimate',
+    ]) {
+      expect(CLAUDE_MD).toContain(phrase);
+    }
+  });
+
+  it('records the traps that have already cost this codebase a bug', () => {
+    // Each of these was a real defect. A fresh session that re-learns
+    // them the hard way has wasted the lesson.
+    for (const trap of ['NULL', 'local wall time', 'UTC', 'parameter propert', 'never zero']) {
+      expect(CLAUDE_MD).toMatch(new RegExp(trap, 'i'));
+    }
+  });
+
+  it('does not claim the app has no server, which stopped being true', () => {
+    for (const [name, body] of Object.entries({
+      'CLAUDE.md': CLAUDE_MD, 'PROGRESS.md': PROGRESS, 'ARCHITECTURE.md': ARCH_MD,
+    })) {
+      expect(body, name).not.toMatch(/there is no (backend|server)/i);
+    }
+  });
+
+  it('is honest that the Garmin login is unverified against live Garmin', () => {
+    // The single most important caveat for whoever deploys this.
+    expect(PROGRESS).toMatch(/never run against live Garmin/i);
+  });
+
+  it('documents every npm script a newcomer is told to run', () => {
+    const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>;
+    for (const s of ['test', 'test:browser', 'test:hosted', 'test:sync', 'test:all']) {
+      expect(scripts[s], `package.json is missing ${s}`).toBeDefined();
+      expect(CLAUDE_MD, `CLAUDE.md does not mention ${s}`).toContain(s);
     }
   });
 });
