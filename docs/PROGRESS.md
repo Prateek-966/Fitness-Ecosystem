@@ -100,13 +100,18 @@ at 0. `npm run test:all` runs everything.
    interface without touching anything else.
 4. **A free-tier Render service sleeps after ~15 min idle**, which also
    stops the sync schedule, and cold-starts in ~50 s.
-5. **The adaptive TDEE model is not built.** `energy_target` already
+   *(Confirmed on the live service.)*
+5. **The service is manually created, not Blueprint-managed**, so
+   `render.yaml`'s `generateValue: true` for `SYNC_TOKEN` does not apply
+   — the variable must be added by hand in the dashboard. Without it the
+   app still runs; only auto-sync is off.
+6. **The adaptive TDEE model is not built.** `energy_target` already
    accepts `source = 'adaptive'` at the top of the formula precedence,
    and `daily_logging_stats.model_eligible` already marks which days are
    clean enough to feed it. It needs ~4–6 weeks of consistent logging
    before there is anything to fit.
-6. **No food data ships.** The app is empty until a CSV is loaded.
-7. The deployed URL could not be reached from the development
+7. **No food data ships.** The app is empty until a CSV is loaded.
+8. The deployed URL could not be reached from the development
    environment (egress proxy), so **live deploys have never been
    verified from here** — only the build, and the server run locally the
    way the container runs it.

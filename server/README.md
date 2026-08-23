@@ -29,7 +29,7 @@ Run it somewhere you control.
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `SYNC_TOKEN` | yes | Bearer token the app must present. Without it the API refuses to start. |
+| `SYNC_TOKEN` | for auto-sync | Bearer token the app must present. **Without it the sync API is switched off** and the app is served normally. |
 | `GARMIN_EMAIL` | for auto-pull | Garmin Connect account |
 | `GARMIN_PASSWORD` | for auto-pull | Garmin Connect password |
 | `GARMIN_ADAPTER` | no | `connect` (default) or `fake` for local development |
@@ -37,15 +37,24 @@ Run it somewhere you control.
 | `SYNC_DB` | no | Where to keep tokens and the window. Default `./data/sync.sqlite3` |
 | `PORT` | no | Default 10000 (Render sets this) |
 
-`SYNC_TOKEN` is not optional and has no default. A public URL serving
-someone's sleep and heart-rate history to any unauthenticated caller is
-not a thing to make easy to do by accident.
+`SYNC_TOKEN` has no default and nothing is generated for you: a public
+URL serving someone's sleep and heart-rate history to any unauthenticated
+caller must not be reachable by omission.
+
+Leaving it unset **disables** the sync API rather than opening it — the
+routes return 503 and the app is served as usual, so food logging and CSV
+import are unaffected. A token that is *present but shorter than 24
+characters* still stops the process: that is a mistake being made, not a
+feature being left off.
+
+Generate one with `openssl rand -hex 32`, or use Render's **Generate**
+button when adding the environment variable.
 
 ## Endpoints
 
 | Route | Purpose |
 |---|---|
-| `GET /api/health` | liveness. No auth, no data. |
+| `GET /api/health` | liveness. No auth, no personal data; reports `syncEnabled`. |
 | `GET /api/garmin/status` | last sync, next sync, whether credentials are configured |
 | `POST /api/garmin/sync` | pull now |
 | `GET /api/garmin/data?since=YYYY-MM-DD` | normalised activities and days |

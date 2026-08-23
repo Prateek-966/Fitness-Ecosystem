@@ -8,6 +8,10 @@
 
 export interface Config {
   port: number;
+  /**
+   * Empty means the sync API is DISABLED - not open. The app is still
+   * served; only /api/garmin/* refuses.
+   */
   syncToken: string;
   garmin: { email: string; password: string } | null;
   adapter: 'connect' | 'fake';
@@ -21,15 +25,23 @@ export class ConfigError extends Error {}
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const syncToken = env.SYNC_TOKEN?.trim() ?? '';
 
-  // No default, no generated fallback. A public URL that serves someone's
-  // sleep and heart-rate history to any unauthenticated caller is not a
-  // thing to make easy to reach by accident.
-  if (!syncToken) {
+  // No default and no generated fallback: a public URL that serves
+  // someone's sleep and heart-rate history to any unauthenticated caller
+  // must not be reachable by omission.
+  //
+  // But a MISSING token disables the sync API rather than killing the
+  // process. Refusing to boot took the whole application down - including
+  // food logging, which has nothing to do with Garmin - over a feature
+  // the user might not even be using yet. The security property is
+  // identical either way, because the API is off rather than open; the
+  // availability difference is not.
+  //
+  // A token that is present but too weak is a different case: that is a
+  // mistake being made, not a feature being left off, and it still stops
+  // the process.
+  if (syncToken && syncToken.length < 24) {
     throw new ConfigError(
-      'SYNC_TOKEN is required. Generate one with: openssl rand -hex 32');
-  }
-  if (syncToken.length < 24) {
-    throw new ConfigError('SYNC_TOKEN must be at least 24 characters');
+      'SYNC_TOKEN must be at least 24 characters. Generate one with: openssl rand -hex 32');
   }
 
   const email = env.GARMIN_EMAIL?.trim();

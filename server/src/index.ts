@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
-import { loadConfig, tokenMatches, ConfigError, type Config } from './config.ts';
+import { loadConfig, tokenMatches, type Config } from './config.ts';
 import { SyncStore } from './store.ts';
 import { Poller } from './poller.ts';
 import { FakeGarmin } from './garmin/fake.ts';
@@ -78,10 +78,25 @@ export function createApp(cfg: Config, poller: Poller, store: SyncStore) {
 
     // ---- liveness: no auth, and deliberately no data ----
     if (path === '/api/health') {
-      return json(res, 200, { ok: true, adapter: cfg.adapter });
+      // Liveness must not depend on sync being configured: the app is
+      // the service's main job, and it is up.
+      return json(res, 200, {
+        ok: true,
+        adapter: cfg.adapter,
+        syncEnabled: cfg.syncToken !== '',
+      });
     }
 
     if (path.startsWith('/api/')) {
+      // No token configured means the sync API is switched off. 503 with
+      // a reason, rather than 401 (which would imply a credential exists)
+      // or silence.
+      if (cfg.syncToken === '') {
+        return json(res, 503, {
+          error: 'sync is not configured on this server',
+          detail: 'Set SYNC_TOKEN in the service environment to enable it.',
+        });
+      }
       if (!authorised(req, cfg)) {
         // A public URL must not confirm what it is holding.
         return json(res, 401, { error: 'unauthorised' });
@@ -149,11 +164,10 @@ export function createApp(cfg: Config, poller: Poller, store: SyncStore) {
 
 export function buildClient(cfg: Config): GarminClient {
   if (cfg.adapter === 'fake') return new FakeGarmin();
-  if (!cfg.garmin) {
-    throw new ConfigError(
-      'GARMIN_EMAIL and GARMIN_PASSWORD are required unless GARMIN_ADAPTER=fake');
-  }
-  return new ConnectGarmin(cfg.garmin.email, cfg.garmin.password);
+  // Constructed even without credentials: it is never started in that
+  // case, and a missing optional credential should not stop the server
+  // from serving the app.
+  return new ConnectGarmin(cfg.garmin?.email ?? '', cfg.garmin?.password ?? '');
 }
 
 // ---- entry point ----
@@ -172,8 +186,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   createApp(cfg, poller, store).listen(cfg.port, () => {
     console.log(`[sync] listening on ${cfg.port}, adapter=${cfg.adapter}, `
-      + `interval=${cfg.intervalMin}min, credentials=${cfg.garmin ? 'set' : 'MISSING'}`);
+      + `interval=${cfg.intervalMin}min, `
+      + `syncApi=${cfg.syncToken ? 'enabled' : 'DISABLED (no SYNC_TOKEN)'}, `
+      + `garminCredentials=${cfg.garmin ? 'set' : 'missing'}`);
+
+    if (!cfg.syncToken) {
+      console.warn('[sync] SYNC_TOKEN is not set, so the Garmin sync API is switched off. '
+        + 'The app is served normally and CSV import still works. '
+        + 'To enable auto-sync, set SYNC_TOKEN (openssl rand -hex 32) and redeploy.');
+      return;
+    }
+    // No point polling Garmin if nothing can ever collect the results.
     if (cfg.garmin || cfg.adapter === 'fake') poller.start();
-    else console.warn('[sync] no Garmin credentials; serving the app only');
+    else console.warn('[sync] no Garmin credentials; serving the app and API only');
   });
 }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { loadConfig, tokenMatches, ConfigError } from '../src/config.ts';
+import { loadConfig, tokenMatches } from '../src/config.ts';
 import { SyncStore } from '../src/store.ts';
 import { Poller, FIRST_PULL_DAYS, OVERLAP_DAYS, pullEndDate } from '../src/poller.ts';
 import { FakeGarmin } from '../src/garmin/fake.ts';
@@ -24,23 +24,24 @@ afterEach(() => store.close());
 // Configuration is a security boundary, so it is checked like one.
 // -----------------------------------------------------------------
 describe('configuration', () => {
-  it('refuses to start without a sync token', () => {
-    // A public URL serving someone's sleep and heart-rate history to any
-    // unauthenticated caller must not be reachable by omission.
-    expect(() => loadConfig({ })).toThrow(ConfigError);
-    expect(() => loadConfig({ SYNC_TOKEN: '' })).toThrow(/required/);
+  it('treats a missing token as "sync off", not as a reason to die', () => {
+    // Refusing to boot took the whole application down - including food
+    // logging, which has nothing to do with Garmin - over a feature that
+    // might not even be in use. The API is switched OFF, not opened.
+    expect(loadConfig({}).syncToken).toBe('');
+    expect(loadConfig({ SYNC_TOKEN: '   ' }).syncToken).toBe('');
   });
 
-  it('refuses a short token', () => {
+  it('still refuses a token that is present but too weak', () => {
+    // A weak token is a mistake being made, not a feature left off.
     expect(() => loadConfig({ SYNC_TOKEN: 'short' })).toThrow(/at least 24/);
   });
 
   it('has no default token to fall back to', () => {
     // Anything generated or defaulted would be a shared secret in a public
     // repository, which is not a secret.
-    let thrown = false;
-    try { loadConfig({}); } catch { thrown = true; }
-    expect(thrown).toBe(true);
+    expect(loadConfig({}).syncToken).toBe('');
+    expect(loadConfig({}).syncToken).not.toMatch(/\w/);
   });
 
   it('treats missing Garmin credentials as "serve the app only", not an error', () => {
@@ -208,11 +209,14 @@ describe('the API', () => {
     expect(JSON.stringify(body)).toBe(JSON.stringify({ error: 'unauthorised' }));
   });
 
-  it('answers liveness without auth and without data', async () => {
+  it('answers liveness without auth and without personal data', async () => {
     const res = await fetch(`${base}/api/health`);
     expect(res.status).toBe(200);
     const body = await res.json() as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['adapter', 'ok']);
+    // Configuration facts only. Nothing here describes the person or
+    // what has been synced.
+    expect(Object.keys(body).sort()).toEqual(['adapter', 'ok', 'syncEnabled']);
+    expect(body.syncEnabled).toBe(true);
   });
 
   it('serves status with a token', async () => {
@@ -350,5 +354,50 @@ describe('dates are UTC throughout, not a mix', () => {
     const end = new Date(`${pullEndDate()}T00:00:00Z`);
     const todayUtc = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
     expect(Math.round((end.getTime() - todayUtc.getTime()) / 86400000)).toBe(1);
+  });
+});
+
+// -----------------------------------------------------------------
+// Degrading rather than dying.
+// -----------------------------------------------------------------
+describe('with no SYNC_TOKEN the app is served and the API is off', () => {
+  let base: string;
+  let server: ReturnType<typeof createApp>;
+
+  beforeEach(async () => {
+    const cfg = loadConfig({ GARMIN_ADAPTER: 'fake', SYNC_DB: DB });
+    server = createApp(cfg, new Poller(new FakeGarmin(1), store, 180), store);
+    await new Promise<void>((ok) => server.listen(0, ok));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterEach(() => new Promise<void>((ok) => server.close(() => ok())));
+
+  it('reports itself healthy, and says sync is off', async () => {
+    const res = await fetch(`${base}/api/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, syncEnabled: false });
+  });
+
+  it('switches the sync API off rather than leaving it open', async () => {
+    // The security property is identical to refusing to boot; the
+    // availability of everything else is not.
+    for (const path of ['/api/garmin/status', '/api/garmin/data?since=2026-01-01']) {
+      const res = await fetch(base + path);
+      expect(res.status).toBe(503);
+      expect((await res.json() as any).error).toMatch(/not configured/);
+    }
+  });
+
+  it('cannot be reached with a guessed token when sync is off', async () => {
+    // An empty configured token must never match an empty presented one.
+    for (const header of ['Bearer ', 'Bearer x', '']) {
+      const res = await fetch(`${base}/api/garmin/status`, { headers: { Authorization: header } });
+      expect(res.status).toBe(503);
+    }
+  });
+
+  it('still serves the application', async () => {
+    // The whole point: food logging does not depend on Garmin config.
+    expect((await fetch(`${base}/`)).status).toBe(200);
   });
 });
