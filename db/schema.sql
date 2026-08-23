@@ -17,7 +17,7 @@ PRAGMA foreign_keys = ON;
 -- Written the instant speech-to-text returns. Always succeeds.
 -- Survives network failure, resolution failure, app crash.
 -- ------------------------------------------------------------
-CREATE TABLE utterance (
+CREATE TABLE IF NOT EXISTS utterance (
     id              INTEGER PRIMARY KEY,
     spoken_at       TEXT    NOT NULL,          -- ISO8601, device local
     tz_offset_min   INTEGER NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE utterance (
     CHECK (raw_text <> '')
 );
 
-CREATE INDEX idx_utterance_unprocessed
+CREATE INDEX IF NOT EXISTS idx_utterance_unprocessed
     ON utterance (spoken_at) WHERE processed_at IS NULL;
 
 
@@ -37,7 +37,7 @@ CREATE INDEX idx_utterance_unprocessed
 -- Composition is per 100 g EDIBLE PORTION, always.
 -- Never inline nutrient numbers in application code.
 -- ------------------------------------------------------------
-CREATE TABLE food (
+CREATE TABLE IF NOT EXISTS food (
     id              INTEGER PRIMARY KEY,
     name            TEXT    NOT NULL,
     brand           TEXT,                      -- null for generic/home foods
@@ -51,7 +51,7 @@ CREATE TABLE food (
     UNIQUE (name, brand, source, source_ref)
 );
 
-CREATE TABLE food_nutrient (
+CREATE TABLE IF NOT EXISTS food_nutrient (
     food_id         INTEGER NOT NULL REFERENCES food(id) ON DELETE CASCADE,
     nutrient        TEXT    NOT NULL,          -- 'kcal','protein_g','fat_g',
                                                -- 'carb_g','fibre_g', ...
@@ -68,7 +68,7 @@ CREATE TABLE food_nutrient (
 -- "One katori" is meaningless until pinned to YOUR katori.
 -- A stable personal constant beats an accurate population average.
 -- ------------------------------------------------------------
-CREATE TABLE unit (
+CREATE TABLE IF NOT EXISTS unit (
     id              INTEGER PRIMARY KEY,
     code            TEXT    NOT NULL UNIQUE,   -- 'g','ml','piece','katori',
                                                -- 'cup','tbsp','tsp','glass'
@@ -76,14 +76,14 @@ CREATE TABLE unit (
 );
 
 -- Which units are offered for a given food. Prevents "2 ml roti".
-CREATE TABLE food_unit (
+CREATE TABLE IF NOT EXISTS food_unit (
     food_id         INTEGER NOT NULL REFERENCES food(id) ON DELETE CASCADE,
     unit_id         INTEGER NOT NULL REFERENCES unit(id),
     PRIMARY KEY (food_id, unit_id)
 );
 
 -- The calibration table. Weigh it once, reuse forever.
-CREATE TABLE user_measure (
+CREATE TABLE IF NOT EXISTS user_measure (
     id              INTEGER PRIMARY KEY,
     food_id         INTEGER REFERENCES food(id), -- null = applies to all foods
     unit_id         INTEGER NOT NULL REFERENCES unit(id),
@@ -103,7 +103,7 @@ CREATE TABLE user_measure (
 --   'pending_quantity' -> food known, amount not yet supplied
 --   'pending_food'     -> should not exist; ambiguity is blocked upstream
 -- ------------------------------------------------------------
-CREATE TABLE log_entry (
+CREATE TABLE IF NOT EXISTS log_entry (
     id              INTEGER PRIMARY KEY,
     utterance_id    INTEGER REFERENCES utterance(id),  -- null = typed entry
     eaten_at        TEXT    NOT NULL,
@@ -127,8 +127,8 @@ CREATE TABLE log_entry (
     )
 );
 
-CREATE INDEX idx_log_eaten     ON log_entry (eaten_at);
-CREATE INDEX idx_log_pending   ON log_entry (status) WHERE status <> 'resolved';
+CREATE INDEX IF NOT EXISTS idx_log_eaten     ON log_entry (eaten_at);
+CREATE INDEX IF NOT EXISTS idx_log_pending   ON log_entry (status) WHERE status <> 'resolved';
 
 
 -- ------------------------------------------------------------
@@ -137,7 +137,7 @@ CREATE INDEX idx_log_pending   ON log_entry (status) WHERE status <> 'resolved';
 -- training data of the TDEE model. Version instead, so a genuine
 -- metabolic shift stays distinguishable from your own correction.
 -- ------------------------------------------------------------
-CREATE TABLE log_revision (
+CREATE TABLE IF NOT EXISTS log_revision (
     id              INTEGER PRIMARY KEY,
     log_entry_id    INTEGER NOT NULL REFERENCES log_entry(id) ON DELETE CASCADE,
     revised_at      TEXT    NOT NULL,
@@ -148,7 +148,7 @@ CREATE TABLE log_revision (
                                                -- 'recalibration'
 );
 
-CREATE INDEX idx_revision_entry ON log_revision (log_entry_id, revised_at);
+CREATE INDEX IF NOT EXISTS idx_revision_entry ON log_revision (log_entry_id, revised_at);
 
 
 -- ------------------------------------------------------------
@@ -157,7 +157,7 @@ CREATE INDEX idx_revision_entry ON log_revision (log_entry_id, revised_at);
 -- the app gets faster the longer you use it, and it is the thing
 -- MyFitnessPal structurally cannot give you.
 -- ------------------------------------------------------------
-CREATE TABLE phrase_index (
+CREATE TABLE IF NOT EXISTS phrase_index (
     id              INTEGER PRIMARY KEY,
     phrase          TEXT    NOT NULL,          -- normalised: lowercase, no plurals
     food_id         INTEGER NOT NULL REFERENCES food(id),
@@ -176,7 +176,7 @@ CREATE TABLE phrase_index (
 -- database switch, a run of restaurant meals, or getting better
 -- at logging (which the model misreads as a metabolic change).
 -- ------------------------------------------------------------
-CREATE TABLE daily_logging_stats (
+CREATE TABLE IF NOT EXISTS daily_logging_stats (
     log_date            TEXT PRIMARY KEY,
     entry_count         INTEGER NOT NULL,
     pending_count       INTEGER NOT NULL,
@@ -197,6 +197,7 @@ CREATE TABLE daily_logging_stats (
 -- Daily totals. Pending entries are EXCLUDED, never summed as zero —
 -- a NULL quantity counted as 0 is silent under-logging, which is the
 -- exact failure this whole design exists to prevent.
+DROP VIEW IF EXISTS v_daily_totals;
 CREATE VIEW v_daily_totals AS
 SELECT
     date(le.eaten_at)                                   AS log_date,
@@ -213,6 +214,7 @@ GROUP BY 1, 2;
 
 -- The end-of-day queue. Short by design; if it isn't, the
 -- fuzzy-match threshold or the unit defaults need work.
+DROP VIEW IF EXISTS v_pending_review;
 CREATE VIEW v_pending_review AS
 SELECT
     le.id,
@@ -229,6 +231,7 @@ WHERE le.status <> 'resolved'
 ORDER BY le.eaten_at;
 
 -- Days that must not enter the TDEE fit.
+DROP VIEW IF EXISTS v_model_excluded_days;
 CREATE VIEW v_model_excluded_days AS
 SELECT log_date, entry_count, pending_count, fastpath_fraction
 FROM daily_logging_stats
@@ -255,15 +258,26 @@ WHERE model_eligible = 0
 -- cannot sum two sources by accident because the view only ever
 -- emits one row per session.
 -- ------------------------------------------------------------
-CREATE TABLE workout_session (
+CREATE TABLE IF NOT EXISTS workout_session (
     id            INTEGER PRIMARY KEY,
     started_at    TEXT NOT NULL,
     duration_min  REAL,
     kind          TEXT,
-    notes         TEXT
+    notes         TEXT,
+    -- Context, not inputs. session_energy still holds the only calorie
+    -- figure any total reads; these are here so a week can be reviewed
+    -- without opening Garmin, and so training load has somewhere to sit
+    -- when the cycling weights want a better signal than duration.
+    -- All nullable: a CSV export carries none of them, and a missing
+    -- measurement is missing rather than zero.
+    distance_m       REAL,
+    avg_hr           REAL,
+    training_load    REAL,
+    aerobic_effect   REAL,
+    anaerobic_effect REAL
 );
 
-CREATE TABLE session_energy (
+CREATE TABLE IF NOT EXISTS session_energy (
     session_id  INTEGER NOT NULL REFERENCES workout_session(id),
     source      TEXT NOT NULL CHECK (source IN ('garmin','met_estimate','manual')),
     kcal        REAL NOT NULL,
@@ -273,6 +287,7 @@ CREATE TABLE session_energy (
 
 -- Prefer garmin, fall back to met_estimate, fall back to manual.
 -- Exactly one row per session, always.
+DROP VIEW IF EXISTS v_session_energy;
 CREATE VIEW v_session_energy AS
 SELECT
     ws.id                       AS session_id,
@@ -297,7 +312,7 @@ WHERE se.source = (
 -- Idempotency for imports. A re-exported month must not double every
 -- workout in it, and NULL kind must not defeat the constraint the way a
 -- plain UNIQUE would (see user_measure, section 3).
-CREATE UNIQUE INDEX ux_workout_session
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workout_session
     ON workout_session (started_at, COALESCE(kind, ''));
 
 
@@ -314,7 +329,7 @@ CREATE UNIQUE INDEX ux_workout_session
 -- time — and a value that came from somewhere is worth more than
 -- one that came from an average of somewheres.
 -- ------------------------------------------------------------
-CREATE TABLE daily_metric (
+CREATE TABLE IF NOT EXISTS daily_metric (
     log_date    TEXT NOT NULL,          -- local calendar day
     metric      TEXT NOT NULL,          -- 'sleep_min','rem_min','deep_min',
                                         -- 'rhr_bpm','hrv_ms','stress_avg',
@@ -326,6 +341,7 @@ CREATE TABLE daily_metric (
     PRIMARY KEY (log_date, metric, source)
 );
 
+DROP VIEW IF EXISTS v_daily_metric;
 CREATE VIEW v_daily_metric AS
 SELECT dm.log_date, dm.metric, dm.source, dm.value
 FROM daily_metric dm
@@ -343,6 +359,7 @@ WHERE dm.source = (
 -- regression cannot cancel out. The model is not built yet; this view
 -- exists so that when it is, the boundary is a row you can see rather
 -- than a discontinuity someone has to rediscover from the residuals.
+DROP VIEW IF EXISTS v_source_coverage;
 CREATE VIEW v_source_coverage AS
 SELECT 'daily_metric' AS relation, metric AS series, source,
        MIN(log_date) AS first_seen, MAX(log_date) AS last_seen, COUNT(*) AS n
@@ -365,7 +382,7 @@ GROUP BY se.source;
 -- must not silently rewrite what last month's target was. The newest
 -- row is current; the older ones are how you got here.
 -- ------------------------------------------------------------
-CREATE TABLE body_profile (
+CREATE TABLE IF NOT EXISTS body_profile (
     id              INTEGER PRIMARY KEY,
     recorded_at     TEXT    NOT NULL,
     -- Selects a formula coefficient set. These equations were fitted on
@@ -385,7 +402,7 @@ CREATE TABLE body_profile (
     goal_weight_kg  REAL
 );
 
-CREATE INDEX idx_body_profile_recorded ON body_profile (recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_body_profile_recorded ON body_profile (recorded_at DESC);
 
 
 -- Every formula that estimates a target gets its OWN ROW, exactly like
@@ -399,7 +416,7 @@ CREATE INDEX idx_body_profile_recorded ON body_profile (recorded_at DESC);
 -- happen, so the user's own decision wins - the brief's eighth principle
 -- is that this app does what it is told and explains the consequence,
 -- rather than the other way round.
-CREATE TABLE energy_target (
+CREATE TABLE IF NOT EXISTS energy_target (
     log_date        TEXT NOT NULL,
     source          TEXT NOT NULL
                     CHECK (source IN ('manual','cycled','adaptive','mifflin','harris','katch')),
@@ -411,6 +428,7 @@ CREATE TABLE energy_target (
     PRIMARY KEY (log_date, source)
 );
 
+DROP VIEW IF EXISTS v_energy_target;
 CREATE VIEW v_energy_target AS
 SELECT et.log_date, et.source, et.kcal, et.basis
 FROM energy_target et
@@ -437,7 +455,7 @@ WHERE et.source = (
 -- utterance is the one write on the critical path and it stays
 -- exactly as narrow as it was designed to be.
 -- ------------------------------------------------------------
-CREATE TABLE capture_timing (
+CREATE TABLE IF NOT EXISTS capture_timing (
     utterance_id    INTEGER PRIMARY KEY REFERENCES utterance(id) ON DELETE CASCADE,
     -- All milliseconds, all relative to the mic tap.
     mic_tap_to_stt  REAL,      -- tap -> speech-to-text returned a transcript
@@ -453,14 +471,14 @@ CREATE TABLE capture_timing (
 -- per unit, because SQLite treats NULLs as distinct inside a UNIQUE
 -- constraint. This partial index does, and gives the upsert something to
 -- name as a conflict target.
-CREATE UNIQUE INDEX ux_user_measure_general
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user_measure_general
     ON user_measure (unit_id) WHERE food_id IS NULL;
 
 -- food's own UNIQUE has the same NULL blind spot for brand and source_ref.
 -- The loader dedupes with IS-comparisons before inserting, so this index
 -- is a backstop, not the mechanism — but a duplicated food is a wandering
 -- resolution target, which is the one thing the whole design cannot absorb.
-CREATE UNIQUE INDEX ux_food_identity
+CREATE UNIQUE INDEX IF NOT EXISTS ux_food_identity
     ON food (name, COALESCE(brand, ''), source, COALESCE(source_ref, ''));
 
 
@@ -471,7 +489,7 @@ CREATE UNIQUE INDEX ux_food_identity
 -- other number that will move once there is real match_score
 -- data to look at.
 -- ------------------------------------------------------------
-CREATE TABLE app_setting (
+CREATE TABLE IF NOT EXISTS app_setting (
     key     TEXT PRIMARY KEY,
     value   TEXT NOT NULL
 );
@@ -489,7 +507,7 @@ CREATE TABLE app_setting (
 -- a strict CSP that should be a distinction without a difference,
 -- but a credential is the wrong thing to protect with one layer.
 -- ------------------------------------------------------------
-CREATE TABLE app_secret (
+CREATE TABLE IF NOT EXISTS app_secret (
     key     TEXT PRIMARY KEY,
     value   TEXT NOT NULL
 );
@@ -506,7 +524,7 @@ CREATE TABLE app_secret (
 -- log_entry rows. They exist to seed phrase_index candidates
 -- and to derive meal-slot windows from real behaviour.
 -- ------------------------------------------------------------
-CREATE TABLE imported_entry (
+CREATE TABLE IF NOT EXISTS imported_entry (
     id              INTEGER PRIMARY KEY,
     source          TEXT    NOT NULL,      -- 'healthify'
     eaten_at        TEXT    NOT NULL,
@@ -516,13 +534,13 @@ CREATE TABLE imported_entry (
     imported_at     TEXT    NOT NULL
 );
 
-CREATE INDEX idx_imported_eaten ON imported_entry (eaten_at);
+CREATE INDEX IF NOT EXISTS idx_imported_eaten ON imported_entry (eaten_at);
 
 -- Import idempotency. A plain UNIQUE over these columns does not survive
 -- a NULL portion_text — SQLite treats NULLs as distinct inside UNIQUE —
 -- so re-importing the same export would duplicate every row that has no
 -- portion. Same lesson user_measure taught: dedupe through an expression.
-CREATE UNIQUE INDEX ux_imported_entry
+CREATE UNIQUE INDEX IF NOT EXISTS ux_imported_entry
     ON imported_entry (source, eaten_at, food_text, COALESCE(portion_text, ''));
 
 
@@ -533,7 +551,7 @@ CREATE UNIQUE INDEX ux_imported_entry
 -- user does, not from what a nutrition app thinks a day looks
 -- like.
 -- ------------------------------------------------------------
-CREATE TABLE meal_slot_window (
+CREATE TABLE IF NOT EXISTS meal_slot_window (
     slot            TEXT PRIMARY KEY,      -- 'breakfast','lunch','snack','dinner'
     centre_min      REAL NOT NULL,         -- minutes past local midnight
     start_min       REAL NOT NULL,
@@ -552,7 +570,7 @@ CREATE TABLE meal_slot_window (
 -- every fuzzy decision, accepted or rejected, with the runner-up
 -- it beat and by how much.
 -- ------------------------------------------------------------
-CREATE TABLE match_audit (
+CREATE TABLE IF NOT EXISTS match_audit (
     id              INTEGER PRIMARY KEY,
     utterance_id    INTEGER REFERENCES utterance(id) ON DELETE CASCADE,
     log_entry_id    INTEGER REFERENCES log_entry(id) ON DELETE SET NULL,
@@ -568,7 +586,7 @@ CREATE TABLE match_audit (
     decided_at      TEXT    NOT NULL
 );
 
-CREATE INDEX idx_match_audit_score ON match_audit (score);
+CREATE INDEX IF NOT EXISTS idx_match_audit_score ON match_audit (score);
 
 
 -- ------------------------------------------------------------
@@ -579,7 +597,7 @@ CREATE INDEX idx_match_audit_score ON match_audit (score);
 -- entries derived from it — so every utterance still has exactly
 -- one visible outcome: entries, a queue position, or an undo.
 -- ------------------------------------------------------------
-CREATE TABLE undone_utterance (
+CREATE TABLE IF NOT EXISTS undone_utterance (
     utterance_id    INTEGER PRIMARY KEY REFERENCES utterance(id) ON DELETE CASCADE,
     undone_at       TEXT    NOT NULL,
     entries_removed INTEGER NOT NULL
@@ -592,6 +610,7 @@ CREATE TABLE undone_utterance (
 
 -- Per-entry detail behind v_daily_totals. Useful for the day
 -- list, and for seeing which single entry owns the error bar.
+DROP VIEW IF EXISTS v_entry_nutrient;
 CREATE VIEW v_entry_nutrient AS
 SELECT
     le.id           AS log_entry_id,
@@ -616,6 +635,7 @@ WHERE le.status = 'resolved';
 -- Utterances with nothing to show for them. This is the
 -- "zero logs lost" check: it must always be empty or visibly
 -- queued, never silently discarded.
+DROP VIEW IF EXISTS v_orphan_utterance;
 CREATE VIEW v_orphan_utterance AS
 SELECT
     u.id,
@@ -630,6 +650,7 @@ ORDER BY u.spoken_at DESC;
 
 -- Fuzzy decisions close enough to the threshold to be worth a
 -- human glance. Drives threshold tuning with evidence.
+DROP VIEW IF EXISTS v_match_review;
 CREATE VIEW v_match_review AS
 SELECT
     ma.decided_at,

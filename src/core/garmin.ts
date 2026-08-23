@@ -28,8 +28,10 @@ import { splitCsv } from './csv';
  */
 
 export type MetricKey =
-  | 'sleep_min' | 'rem_min' | 'deep_min' | 'rhr_bpm'
-  | 'hrv_ms' | 'stress_avg' | 'body_battery_max' | 'steps';
+  | 'sleep_min' | 'rem_min' | 'deep_min' | 'light_min' | 'awake_min'
+  | 'sleep_score' | 'rhr_bpm' | 'hrv_ms'
+  | 'stress_avg' | 'stress_max' | 'stress_rest_min' | 'stress_high_min'
+  | 'body_battery_max' | 'body_battery_min' | 'steps';
 
 export interface GarminActivity {
   startedAt: string;          // local ISO, no zone suffix
@@ -37,6 +39,16 @@ export interface GarminActivity {
   durationMin: number | null;
   kcal: number | null;
   title: string | null;
+  /**
+   * Context, not inputs. `session_energy` still takes only kcal, and
+   * nothing in the energy model reads these. Optional because the CSV
+   * export does not always carry them and a missing figure is missing.
+   */
+  distanceM?: number | null;
+  avgHr?: number | null;
+  trainingLoad?: number | null;
+  aerobicEffect?: number | null;
+  anaerobicEffect?: number | null;
 }
 
 export interface GarminDay {
@@ -73,10 +85,17 @@ const METRIC_COLUMNS: Record<MetricKey, string[]> = {
   sleep_min: ['total sleep', 'sleep duration', 'sleep time', 'sleep'],
   rem_min: ['rem sleep', 'rem'],
   deep_min: ['deep sleep', 'deep'],
+  light_min: ['light sleep', 'light'],
+  awake_min: ['awake time', 'time awake', 'awake'],
+  sleep_score: ['sleep score'],
   rhr_bpm: ['resting heart rate', 'resting hr', 'rhr'],
   hrv_ms: ['avg overnight hrv', 'heart rate variability', 'hrv'],
   stress_avg: ['average stress', 'avg stress', 'stress level', 'stress'],
+  stress_max: ['maximum stress', 'highest stress', 'max stress'],
+  stress_rest_min: ['resting stress', 'rest stress'],
+  stress_high_min: ['high stress'],
   body_battery_max: ['body battery high', 'max body battery', 'body battery'],
+  body_battery_min: ['body battery low', 'lowest body battery', 'min body battery'],
   steps: ['total steps', 'steps'],
 };
 
@@ -317,13 +336,30 @@ export function importGarmin(
       let sessionId: number;
       if (existing) {
         sessionId = existing.id;
-        db.run('UPDATE workout_session SET duration_min = ?, notes = ? WHERE id = ?',
-               [a.durationMin, a.title, sessionId]);
+        db.run(
+          `UPDATE workout_session
+              SET duration_min = ?, notes = ?,
+                  -- COALESCE, not assignment: a CSV re-import carries
+                  -- none of these and must not erase what the API pull
+                  -- already established.
+                  distance_m       = COALESCE(?, distance_m),
+                  avg_hr           = COALESCE(?, avg_hr),
+                  training_load    = COALESCE(?, training_load),
+                  aerobic_effect   = COALESCE(?, aerobic_effect),
+                  anaerobic_effect = COALESCE(?, anaerobic_effect)
+            WHERE id = ?`,
+          [a.durationMin, a.title, a.distanceM ?? null, a.avgHr ?? null,
+           a.trainingLoad ?? null, a.aerobicEffect ?? null,
+           a.anaerobicEffect ?? null, sessionId]);
       } else {
         sessionId = db.run(
-          `INSERT INTO workout_session (started_at, duration_min, kind, notes)
-           VALUES (?,?,?,?)`,
-          [a.startedAt, a.durationMin, a.kind, a.title],
+          `INSERT INTO workout_session (started_at, duration_min, kind, notes,
+                                        distance_m, avg_hr, training_load,
+                                        aerobic_effect, anaerobic_effect)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
+          [a.startedAt, a.durationMin, a.kind, a.title,
+           a.distanceM ?? null, a.avgHr ?? null, a.trainingLoad ?? null,
+           a.aerobicEffect ?? null, a.anaerobicEffect ?? null],
         ).lastInsertRowid;
         activitiesInserted++;
       }

@@ -44,6 +44,18 @@ export class SyncStore {
         PRIMARY KEY (log_date, metric)
       );
     `);
+
+    // Additive, so an existing deployment gains the columns without a
+    // migration step. ALTER TABLE ADD COLUMN throws if it is already
+    // there, and there is no IF NOT EXISTS for it in SQLite.
+    for (const col of ['distance_m REAL', 'avg_hr REAL',
+      'training_load REAL', 'aerobic_effect REAL', 'anaerobic_effect REAL']) {
+      try {
+        this.db.exec(`ALTER TABLE window_activity ADD COLUMN ${col}`);
+      } catch {
+        // Already present.
+      }
+    }
   }
 
   get(key: string): string | null {
@@ -61,11 +73,16 @@ export class SyncStore {
   save(pull: GarminPull): { activities: number; metrics: number } {
     let metrics = 0;
     const insA = this.db.prepare(
-      `INSERT INTO window_activity (started_at, kind, duration_min, kcal, title)
-       VALUES (?,?,?,?,?)
+      `INSERT INTO window_activity (started_at, kind, duration_min, kcal, title,
+                                    distance_m, avg_hr, training_load,
+                                    aerobic_effect, anaerobic_effect)
+       VALUES (?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(started_at, kind) DO UPDATE SET
          duration_min = excluded.duration_min, kcal = excluded.kcal,
-         title = excluded.title`);
+         title = excluded.title, distance_m = excluded.distance_m,
+         avg_hr = excluded.avg_hr, training_load = excluded.training_load,
+         aerobic_effect = excluded.aerobic_effect,
+         anaerobic_effect = excluded.anaerobic_effect`);
     const insD = this.db.prepare(
       `INSERT INTO window_day (log_date, metric, value) VALUES (?,?,?)
        ON CONFLICT(log_date, metric) DO UPDATE SET value = excluded.value`);
@@ -73,7 +90,9 @@ export class SyncStore {
     this.db.exec('BEGIN');
     try {
       for (const a of pull.activities) {
-        insA.run(a.startedAt, a.kind ?? '', a.durationMin, a.kcal, a.title);
+        insA.run(a.startedAt, a.kind ?? '', a.durationMin, a.kcal, a.title,
+          a.distanceM ?? null, a.avgHr ?? null, a.trainingLoad ?? null,
+          a.aerobicEffect ?? null, a.anaerobicEffect ?? null);
       }
       for (const d of pull.days) {
         for (const [metric, value] of Object.entries(d.metrics)) {
@@ -92,13 +111,20 @@ export class SyncStore {
 
   read(since: string): GarminPull {
     const activities = this.db.prepare(
-      `SELECT started_at, kind, duration_min, kcal, title FROM window_activity
-       WHERE started_at >= ? ORDER BY started_at`).all(since).map((r: any) => ({
+      `SELECT started_at, kind, duration_min, kcal, title, distance_m, avg_hr,
+              training_load, aerobic_effect, anaerobic_effect
+         FROM window_activity
+        WHERE started_at >= ? ORDER BY started_at`).all(since).map((r: any) => ({
         startedAt: r.started_at,
         kind: r.kind === '' ? null : r.kind,
         durationMin: r.duration_min,
         kcal: r.kcal,
         title: r.title,
+        distanceM: r.distance_m,
+        avgHr: r.avg_hr,
+        trainingLoad: r.training_load,
+        aerobicEffect: r.aerobic_effect,
+        anaerobicEffect: r.anaerobic_effect,
       }));
 
     const byDate = new Map<string, Record<string, number>>();

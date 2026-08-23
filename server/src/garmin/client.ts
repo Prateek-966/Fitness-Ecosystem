@@ -13,13 +13,28 @@ export interface GarminActivity {
   durationMin: number | null;
   kcal: number | null;
   title: string | null;
+  /**
+   * Context, not inputs. Nothing in the energy model reads these - the
+   * calorie figure is still Garmin's own estimate and still the only
+   * thing `session_energy` takes. They exist so a week can be reviewed
+   * without opening Garmin, and so training load has somewhere to land
+   * when the cycling weights eventually want a better signal than
+   * duration.
+   */
+  distanceM?: number | null;
+  avgHr?: number | null;
+  trainingLoad?: number | null;
+  aerobicEffect?: number | null;
+  anaerobicEffect?: number | null;
 }
 
 export interface GarminDay {
   logDate: string;              // YYYY-MM-DD
   metrics: Partial<Record<
-    'sleep_min' | 'rem_min' | 'deep_min' | 'rhr_bpm' |
-    'hrv_ms' | 'stress_avg' | 'body_battery_max' | 'steps', number>>;
+    'sleep_min' | 'rem_min' | 'deep_min' | 'light_min' | 'awake_min' |
+    'sleep_score' | 'rhr_bpm' | 'hrv_ms' |
+    'stress_avg' | 'stress_max' | 'stress_rest_min' | 'stress_high_min' |
+    'body_battery_max' | 'body_battery_min' | 'steps', number>>;
 }
 
 export interface GarminPull {

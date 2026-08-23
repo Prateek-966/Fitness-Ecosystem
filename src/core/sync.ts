@@ -143,8 +143,10 @@ export async function pullFromSync(
 const ISO_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?/;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const METRIC_KEYS = new Set([
-  'sleep_min', 'rem_min', 'deep_min', 'rhr_bpm',
-  'hrv_ms', 'stress_avg', 'body_battery_max', 'steps',
+  'sleep_min', 'rem_min', 'deep_min', 'light_min', 'awake_min', 'sleep_score',
+  'rhr_bpm', 'hrv_ms',
+  'stress_avg', 'stress_max', 'stress_rest_min', 'stress_high_min',
+  'body_battery_max', 'body_battery_min', 'steps',
 ]);
 
 /**
@@ -168,6 +170,11 @@ export function sanitiseActivities(raw: unknown): GarminActivity[] {
       durationMin: finiteOrNull(r.durationMin),
       kcal: finiteOrNull(r.kcal),
       title: typeof r.title === 'string' ? r.title : null,
+      distanceM: finiteOrNull(r.distanceM),
+      avgHr: finiteOrNull(r.avgHr),
+      trainingLoad: finiteOrNull(r.trainingLoad),
+      aerobicEffect: finiteOrNull(r.aerobicEffect),
+      anaerobicEffect: finiteOrNull(r.anaerobicEffect),
     });
   }
   return out;

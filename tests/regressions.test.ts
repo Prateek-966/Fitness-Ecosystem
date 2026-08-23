@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { NodeDb } from '../src/platform/node-db';
+import { initSchema } from '../src/core/db';
 import { addFood, calibrate, freshDb, indexPhrase, unitId } from './helpers';
 import type { Db } from '../src/core/db';
 import { handleUtterance, recalibrate, resolveSlowPath, revise } from '../src/core/resolve';
@@ -191,5 +194,94 @@ describe('multi-item slow path', () => {
     expect(items).toHaveLength(1);
     expect(items[0].phrase).toBeNull();
     expect(items[0].rawText).toBe('two katoris');
+  });
+});
+
+// -----------------------------------------------------------------
+// Opening a database that predates part of the schema.
+// -----------------------------------------------------------------
+describe('a database created by an older version of the app', () => {
+  const SCHEMA = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8');
+  const SEED = readFileSync(new URL('../db/seed.sql', import.meta.url), 'utf8');
+
+  /** Every relation schema.sql declares, by name. */
+  const declared = (kind: 'TABLE' | 'VIEW') =>
+    [...SCHEMA.matchAll(new RegExp(`^CREATE ${kind}(?: IF NOT EXISTS)? (\\\\w+)`, 'gm'))]
+      .map((m) => m[1]);
+
+  it('gains the tables that were added after it was created', () => {
+    // The real failure: an OPFS database created before goal setting
+    // landed opened fine and then died on the first query, with
+    // "no such table: body_profile". initSchema used to run schema.sql
+    // only when a sentinel table was absent, so anything added later
+    // never arrived.
+    // Built by aging a real database rather than by hand-writing a
+    // stub, which would drift from schema.sql and stop testing this.
+    const old = new NodeDb(':memory:');
+    initSchema(old, SCHEMA, SEED);
+    old.exec('DROP TABLE body_profile');
+    old.exec('DROP TABLE energy_target');
+
+    initSchema(old, SCHEMA, SEED);
+
+    const present = new Set(old.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type IN ('table','view')").map((r) => r.name));
+    for (const name of [...declared('TABLE'), ...declared('VIEW')]) {
+      expect(present.has(name), `missing after upgrade: ${name}`).toBe(true);
+    }
+    expect(present.has('body_profile')).toBe(true);
+  });
+
+  it('gains columns added to a table it already had', () => {
+    // IF NOT EXISTS skips the whole CREATE TABLE, so a new column on an
+    // existing table needs its own path. This is that path.
+    const old = new NodeDb(':memory:');
+    initSchema(old, SCHEMA, SEED);
+    old.exec('DROP TABLE workout_session');
+    old.exec(`CREATE TABLE workout_session (
+      id INTEGER PRIMARY KEY, started_at TEXT NOT NULL,
+      duration_min REAL, kind TEXT, notes TEXT);`);
+
+    initSchema(old, SCHEMA, SEED);
+
+    const columns = new Set(old.all<{ name: string }>('PRAGMA table_info(workout_session)')
+      .map((r) => r.name));
+    for (const c of ['distance_m', 'avg_hr', 'training_load',
+      'aerobic_effect', 'anaerobic_effect']) {
+      expect(columns.has(c), `missing column: ${c}`).toBe(true);
+    }
+  });
+
+  it('keeps the data it already held', () => {
+    // An upgrade that silently emptied the log would be far worse than
+    // the crash it replaces.
+    const old = new NodeDb(':memory:');
+    initSchema(old, SCHEMA, SEED);
+    old.exec('DROP TABLE body_profile');
+    old.run(`INSERT INTO utterance (raw_text, spoken_at, tz_offset_min)
+             VALUES (?,?,?)`,
+      ['two rotis and rajma', '2026-08-20T13:00:00', 330]);
+
+    initSchema(old, SCHEMA, SEED);
+
+    expect(old.get<{ raw_text: string }>('SELECT raw_text FROM utterance')?.raw_text)
+      .toBe('two rotis and rajma');
+  });
+
+  it('refreshes a view whose definition has since changed', () => {
+    // Views hold no data, so they are dropped and recreated rather than
+    // left alone. A stale precedence view would silently return the
+    // wrong number, which is worse than an error.
+    const old = new NodeDb(':memory:');
+    initSchema(old, SCHEMA, SEED);
+    old.exec('DROP VIEW v_session_energy');
+    old.exec('CREATE VIEW v_session_energy AS SELECT 1 AS wrong');
+
+    initSchema(old, SCHEMA, SEED);
+
+    const sql = old.get<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE name = 'v_session_energy'")?.sql ?? '';
+    expect(sql).not.toContain('wrong');
+    expect(sql).toContain('session_energy');
   });
 });

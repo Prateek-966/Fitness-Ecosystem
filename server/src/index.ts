@@ -162,12 +162,18 @@ export function createApp(cfg: Config, poller: Poller, store: SyncStore) {
   });
 }
 
-export function buildClient(cfg: Config): GarminClient {
+export function buildClient(cfg: Config, store?: SyncStore): GarminClient {
   if (cfg.adapter === 'fake') return new FakeGarmin();
   // Constructed even without credentials: it is never started in that
   // case, and a missing optional credential should not stop the server
   // from serving the app.
-  return new ConnectGarmin(cfg.garmin?.email ?? '', cfg.garmin?.password ?? '');
+  //
+  // The store is passed so the OAuth1 token - which Garmin issues for
+  // about a year - survives a restart. Without it every redeploy costs
+  // a full password login, and hammering their SSO is how accounts get
+  // rate-limited.
+  return new ConnectGarmin(
+    cfg.garmin?.email ?? '', cfg.garmin?.password ?? '', store ?? null);
 }
 
 // ---- entry point ----
@@ -181,7 +187,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const store = new SyncStore(cfg.dbPath);
-  const client = buildClient(cfg);
+  const client = buildClient(cfg, store);
   const poller = new Poller(client, store, cfg.intervalMin);
 
   createApp(cfg, poller, store).listen(cfg.port, () => {

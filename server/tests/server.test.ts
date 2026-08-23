@@ -65,7 +65,14 @@ describe('configuration', () => {
 // -----------------------------------------------------------------
 describe('the sync window', () => {
   const pull = {
-    activities: [{ startedAt: '2026-08-20T06:30:00', kind: 'Running', durationMin: 48, kcal: 620, title: 'Run' }],
+    activities: [{
+      startedAt: '2026-08-20T06:30:00', kind: 'Running', durationMin: 48,
+      kcal: 620, title: 'Run',
+      // The context fields ride along; the round-trip has to carry them
+      // or the app sees a workout stripped of everything but calories.
+      distanceM: 8200, avgHr: 152, trainingLoad: 141,
+      aerobicEffect: 3.4, anaerobicEffect: 0.6,
+    }],
     days: [{ logDate: '2026-08-20', metrics: { sleep_min: 445, rhr_bpm: 49 } }],
   };
 
