@@ -3,7 +3,7 @@
 Where this project actually stands. Read [`../CLAUDE.md`](../CLAUDE.md)
 first for the rules; this file is the ledger.
 
-**Last updated:** at commit `479d054` (Garmin sync server).
+**Last updated:** after the Garmin login rewrite and the schema-upgrade fix.
 **Branch:** `claude/build-fl0w1l`, fast-forwarded to `main` so Render
 redeploys.
 
@@ -56,6 +56,8 @@ automation, not the data.
 | **Weekly calorie cycling** from watch metrics | done |
 | **Garmin file import** (activities + wellness) | done |
 | **Garmin auto-sync server** | done — *see §4* |
+| Garmin login rewritten against working references | done |
+| Session tokens persisted across restarts | done |
 | Backup export (`.sqlite3`) | done |
 | PWA, offline shell, OPFS persistence | done |
 
@@ -81,20 +83,39 @@ at 0. `npm run test:all` runs everything.
 | Target precedence **inverted** vs `session_energy` | Measurements: best instrument wins. Decisions: the user wins. |
 | Imported Healthify rows never become `log_entry` | A different food database is a step change in bias. |
 | Sync token in `app_secret`, not `app_setting` | The UI snapshot carries every setting; a credential must not cross that boundary. |
+| The OAuth1 consumer credential is **pinned**, not fetched | Every client in this space pulls it from a third-party S3 bucket at login, which puts someone outside both the owner and Garmin in a position to supply the key that signs requests against the account. The fetch survives as a fallback for the day Garmin rotates it. |
+| `schema.sql` is idempotent and always runs | It used to run only when a sentinel table was absent, so a table added later never reached an existing database. That shipped as `no such table: body_profile` in a live browser. Views are dropped and recreated; a stale precedence view returns a confidently wrong number, which is worse than an error. |
+| The app's own data stays in the browser, not Supabase | Non-negotiable #2 is *capture never blocks*. A network round-trip on the capture path means speaking a meal offline either blocks or is lost. |
 
 ---
 
 ## 4. Known limitations — read before trusting
 
 1. **The Garmin Connect login flow has never run against live Garmin.**
-   The development environment has no outbound network access. It is
-   written to the documented shape, isolated behind a four-method
-   interface (`server/src/garmin/client.ts`), and every step throws its
-   own named error so the first real run identifies the broken one.
-   *Everything around it is tested* against a deterministic fake.
-   **This is the highest-priority thing to verify on a real deploy.**
+   Still true, but much less alarming than it was. The flow was
+   **rewritten against garth and cyberjunky's python-garminconnect**
+   after the owner supplied them, which found four defects that would
+   each have failed on the first real sync:
+   - it scraped an HTML form for a `_csrf` token; Garmin moved to a JSON
+     mobile API (`POST /sso/mobile/api/login`);
+   - it skipped the **entire OAuth1 leg**. The real sequence is ticket →
+     `oauth-service/oauth/preauthorized` → `exchange/user/2.0`, and both
+     of the latter must carry an HMAC-SHA1 signature;
+   - it omitted `displayName` from the daily URLs, which **403s** rather
+     than 404s and reads like an auth failure;
+   - it guessed a three-hour token lifetime instead of reading
+     `expires_in`.
+
+   The signing is the one part provable without Garmin, and it is
+   proved: the published Twitter OAuth1 vector reproduces exactly
+   (`server/tests/oauth1.test.ts`). The flow's *shape* is pinned by
+   `server/tests/connect.test.ts`. **Verifying it against a real account
+   is still the highest-priority thing to do on a real deploy.**
 2. **MFA Garmin accounts are not supported** — the adapter detects and
-   refuses with a clear message. File import still works.
+   refuses with a clear message. The owner confirmed this account does
+   not use MFA. Garmin *does* support it (`MFA_REQUIRED`, then a code to
+   `/mobile/api/mfa/verifyCode`); adding it needs an interactive prompt
+   in the UI, not a change to the adapter.
 3. **Garmin's official Health API is a partner programme** requiring
    approval. If granted, it drops in as a second adapter against the same
    interface without touching anything else.
@@ -114,7 +135,11 @@ at 0. `npm run test:all` runs everything.
 8. The deployed URL could not be reached from the development
    environment (egress proxy), so **live deploys have never been
    verified from here** — only the build, and the server run locally the
-   way the container runs it.
+   way the container runs it. Note that `raw.githubusercontent.com`
+   *is* reachable, which is how the Garmin references were read.
+9. **The server store is still SQLite on a Render disk.** The owner has
+   connected Supabase and it is the better home for it — it removes the
+   disk requirement entirely and survives redeploys. Not yet moved.
 
 ---
 
@@ -125,7 +150,12 @@ Roughly in priority order. None of these are started.
 1. **Verify the Garmin login against a real account.** Deploy, set
    `GARMIN_EMAIL`/`GARMIN_PASSWORD`, press *Sync now*, read the error.
    Fix `server/src/garmin/connect.ts` — it is designed so only that file
-   should be wrong.
+   should be wrong, and each step names itself when it fails.
+2. **Move the server store to Supabase** (owner asked; see §4.9). The
+   window and the tokens only — not the app's data.
+3. **An always-visible sync-staleness indicator** (owner chose this over
+   a quiet badge). Watch data going stale silently skews calorie
+   cycling, which is the actual risk.
 2. **Answer the actual v0 question:** 30 consecutive days of logging.
    Everything else is diagnostics for why that failed. Resist adding
    features until this is answered.

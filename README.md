@@ -20,6 +20,99 @@ it can be typed, and will that keep happening for 30 days?**
 
 ---
 
+## Features
+
+Everything below is built and covered by tests. Nothing here is a plan.
+
+### Capture — the part that has to be faster than typing
+
+| | |
+|---|---|
+| **Speak or type a meal** | "two rotis and a katori of rajma" lands as two entries with grams resolved. |
+| **The write never blocks** | The raw utterance is committed *before* parsing, matching or anything else that can fail. A crash downstream cannot lose what you said. |
+| **No model call, no network** | The parser is deterministic and local. Sub-second, offline, on a plane. |
+| **It learns your vocabulary** | Every resolved phrase joins your own `phrase_index`. The second "rajma" is an exact hit. |
+| **Fast path / slow path** | A known phrase writes straight through with a toast. An unknown one goes to a queue you clear in one pass — and is fast forever after. |
+| **Undo, 5 seconds, non-blocking** | The toast is the confirmation screen. There isn't another one. |
+
+### Honesty about numbers
+
+| | |
+|---|---|
+| **Error bars, not false precision** | Daily totals combine per-food relative errors *in quadrature* and report `1,925 ± 30`, not `1,925`. |
+| **Every number has provenance** | No nutrient value is hard-coded anywhere in the source. Each carries a `source` and a `rel_error` — 22% for a packaged label, because that is what FSSAI tolerance permits. |
+| **Pending entries are excluded, never zeroed** | A quantity you haven't given yet is not zero calories. The day is marked incomplete instead of showing a finished-looking number. |
+| **Edits are append-only** | Every change writes a `log_revision`. Recalibrating a measure writes one *per affected entry*. |
+| **Estimates are stored, never summed** | One row per source, precedence decided at read time in a view. Double-counting is structurally impossible rather than merely avoided. |
+
+### Household measures
+
+| | |
+|---|---|
+| **Weigh once, applies forever** | Weigh your katori, your piece, your glass. One time. |
+| **Retroactive recalibration** | Correcting a measure re-derives every past entry that used it, each with its own revision row. |
+| **Refuses to invent grams** | A measure you have never weighed resolves to `null`, not to a guess. |
+| **Per-food overrides** | A katori of rice and a katori of dal can differ, and the food-specific calibration wins. |
+
+### Goals and targets
+
+| | |
+|---|---|
+| **Three BMR formulas side by side** | Mifflin-St Jeor, Harris-Benedict and Katch-McArdle, with the disagreement shown rather than hidden behind one number. |
+| **Pinned to a published calculator** | Every activity factor and the energy density are asserted against calculator.net's own output, to the figure. Two of them were wrong before that test existed. |
+| **Macro budget, water, steps, goal weight** | Protein/carb/fat split, fibre per 1000 kcal, glasses, step target, target weight and rate. |
+| **Per-meal targets from your own history** | Calories are divided across the day using *your* meal-slot windows, not someone's idea of when lunch is. |
+| **Weekly calorie cycling** | Harder training days get more, rest days get less, and the **weekly total is conserved** — a transparent weighted sum over training load, sleep, HRV and stress, with every weight visible and adjustable. |
+| **A safe floor that is never silently applied** | Below 1500 kcal (male) / 1200 (female) you are told, not clamped. |
+
+### Garmin
+
+| | |
+|---|---|
+| **Auto-sync** | The server signs in on a schedule and the app collects what it found. OAuth1 → OAuth2, tokens persisted, so a restart costs no password login. |
+| **File import** | A CSV from Garmin Connect, dropped into Diagnostics. No server, no credentials. |
+| **Same import path either way** | Both routes run through identical code, so every guarantee holds identically. |
+| **Re-syncing corrects, never duplicates** | Idempotent on `(started_at, kind)`. Overlapping windows are the normal case. |
+| **A missing metric stays missing** | A watch on the charger did not record zero steps. |
+| **Sleep, stress, HRV, body battery, steps** | Plus distance, average heart rate, training load and aerobic/anaerobic effect per session. |
+| **Garmin's calories stay Garmin's estimate** | Never merged with, or added to, any other estimate of the same session. |
+
+### Meal slots, learned not assumed
+
+| | |
+|---|---|
+| **Your meal times are clustered from your logs** | Exact 1-D dynamic programming, not k-means — the same data always gives the same windows. |
+| **Today groups by meal** | With a `+` per meal, and a target per meal. |
+| **Nothing is hard-coded** | There is no table of when dinner is. |
+
+### Diagnostics — the app watching itself
+
+| | |
+|---|---|
+| **Bias-drift detection** | `daily_logging_stats` records *how* each day was logged, not just what. A change of regime is visible before it corrupts a regression. |
+| **Match review** | Every fuzzy decision is logged with its score and runner-up, ordered by closeness to the threshold, so you tune from data rather than by feel. |
+| **Capture timing** | Measured, against the three-second claim. |
+| **Model eligibility** | Which days are clean enough to feed an adaptive TDEE fit, marked from the day you start. |
+
+### Where your data lives
+
+| | |
+|---|---|
+| **In your browser** | SQLite compiled to WASM, persisted to OPFS, in a dedicated worker. |
+| **Offline** | It is a PWA. Add it to the home screen; capture works with no network at all. |
+| **Backup is a real database file** | Export a `.sqlite3` you can open with any SQLite tool. No proprietary format, no lock-in. |
+| **The server is a fetcher, not a store** | Delete it and you lose the automation, not the history. |
+
+### Deliberately absent
+
+No ML model or LLM on the capture path. No onboarding, accounts, or
+multi-tenancy. No analytics. No nudges to eat and no recommendation
+engine — principle 8 says never nag. No hard-coded meal times. The
+largest risk to this project is scope creep, and the brief says it has
+already happened once.
+
+---
+
 ## Running it
 
 ```sh
@@ -80,85 +173,99 @@ every guarantee already tested holds identically — re-pulling corrects
 rather than duplicates, Garmin's calorie figure stays its own estimate,
 and a missing metric stays missing rather than becoming zero.
 
-> **The Connect adapter is not verified against live Garmin.** This
-> project was developed without outbound network access. The flow is
-> written to the documented shape and every step fails loudly and
-> separately, so the first real run tells you exactly which one is wrong.
-> Garmin's official Health API is a partner programme requiring approval;
-> if you are granted it, it drops in as a second adapter behind the same
-> four-method interface. MFA accounts are not supported and say so.
+> **The Connect adapter has not run against live Garmin.** The flow was
+> corrected against working open-source implementations and its shape is
+> pinned by tests — the OAuth1 signing reproduces the published test
+> vector byte for byte — but no real Garmin response has ever reached it.
+> Every step fails loudly and separately, so the first real run names the
+> broken one. Garmin's official Health API is a partner programme
+> requiring approval; if you are granted it, it drops in as a second
+> adapter behind the same interface. MFA accounts are refused with a
+> message that says what to do.
 
 ## Deploying
 
-The app is a folder of static files. It has no server, no database, no
-environment secret and nothing to leak — every byte of personal data lives
-in the visitor's own browser. What hosting buys is **HTTPS**, and that is
-not cosmetic: Web Speech and OPFS both require a secure context, so the
-mic and persistence simply do not work from a plain `http://` LAN address.
+**A Docker web service, not a static site.** It was a static site until
+auto-pull from Garmin became a requirement: that needs somewhere to hold
+a credential and run a schedule, and a browser page can hold neither. The
+service serves the built app *and* the sync API from **one origin**, so
+`connect-src` stays `'self'`, there is no CORS, and there is no second
+host to keep locked down.
 
-`render.yaml` in the repo root is a Render Blueprint. On Render:
-**New → Blueprint → connect this repo → Apply**. It picks up the build
-command, publish directory, cache policy and security headers from that
-file; there is nothing to fill in and no secrets to add.
+`render.yaml` is a Render Blueprint: **New → Blueprint → connect this
+repo → Apply**. It sets the runtime, the health check, the disk and the
+environment variables. Creating the service by hand works too, but then
+the Blueprint's disk and generated token do not apply and both must be
+added in the dashboard.
 
-### Static Site, not Web Service
+### Environment
 
-Pick **Static Site**. A free-tier *web service* sleeps after ~15 minutes
-idle and cold-starts in roughly 50 seconds — a poor match for an app whose
-entire claim is "logged in under three seconds". A static site is free,
-CDN-backed and never sleeps. Render cannot convert one type into the
-other, so a service created as the wrong type has to be recreated.
+| Variable | Required | What it does |
+|---|---|---|
+| `SYNC_TOKEN` | for sync | Bearer token the app presents. Generate with `openssl rand -hex 32`. **Without it the sync API is switched off and the app is served normally** — food logging does not depend on Garmin. A token shorter than 24 characters stops the process, because that is a mistake being made rather than a feature left off. |
+| `GARMIN_EMAIL` | for sync | Your Garmin Connect login. |
+| `GARMIN_PASSWORD` | for sync | Its password. |
+| `SYNC_INTERVAL_MIN` | no | Default 180. Garmin publishes daily summaries a few times a day; polling faster earns nothing and spends goodwill with their rate limiter. Values under 15 are rejected. |
+| `GARMIN_ADAPTER` | no | `connect` (default) or `fake`, which serves deterministic data for testing without credentials. |
+| `SYNC_DB` | no | Where the server keeps tokens and the rolling window. The Dockerfile sets `/app/data/sync.sqlite3`, which is the disk mount below. |
+| `STATIC_DIR` | no | Where the built app is served from. The Dockerfile sets `/app/dist`. |
 
-Or configure it by hand — any static host works the same way:
+Paste the same `SYNC_TOKEN` into the app under **Diagnostics → Garmin
+auto-sync**. It is stored in its own `app_secret` table rather than
+`app_setting`, because the snapshot the UI renders from carries every
+setting and a credential must not cross that boundary.
 
-| | |
-|---|---|
-| Build command | `npm ci --include=dev && npm run build` |
-| Publish directory | `dist` |
-| Rewrites | none — the app has no client-side router |
+**Add the disk**: mount `/app/data`, 1 GB. It holds the Garmin session
+tokens and the rolling window. Without it a redeploy costs a fresh login
+and a re-pull — not data loss, since your history is in the browser, but
+avoidable.
 
-`--include=dev` is deliberate: hosts set `NODE_ENV=production`, which
-makes npm skip devDependencies, and `vite` and `typescript` live there.
+### What reaches the logs
 
-Verify the built output before trusting a deploy:
+The host's log stream gets one line at boot and nothing else:
 
-```sh
-npm run test:hosted   # serves dist/ from a dumb static server, runs the
-                      # full browser suite against it, checks the SW
-npm run test:sync     # boots the real server, drives the app against it
+```
+[sync] listening on 10000, adapter=connect, interval=180min, syncApi=enabled, garminCredentials=set
 ```
 
-That serves `dist/` with nothing but a MIME table — no rewrites, no dev
-conveniences — because `vite preview` is friendlier than a real host and
-will hide problems a static host would not.
+No password, no token, no measurement. Credentials are reported as
+present or absent, never by value, and a test enforces it. Sync failures
+are stored in the database and served over the authenticated API instead,
+because a failure message can quote a Garmin response and those contain
+your data.
 
-### Containers
-
-`Dockerfile` builds the app and serves `dist/` through nginx with the same
-headers `render.yaml` sets — for a container host, a home NAS, or a Render
-*web service* if you already made one. It is the fallback, not the
-recommendation, for the cold-start reason above.
+### Running the container yourself
 
 ```sh
-docker build -t nutrition-log . && docker run -p 8080:10000 nutrition-log
+docker build -t nutrition-log .
+docker run -p 8080:10000 -e SYNC_TOKEN=$(openssl rand -hex 32) nutrition-log
 ```
 
-The container listens on `$PORT` (default 10000), which is what Render
-injects. All response headers live in the `server` block of
-`docker/nginx.conf.template` and nowhere else: in nginx an `add_header`
-inside a `location` *replaces* the inherited set instead of adding to it,
-so a per-location `Cache-Control` would silently drop the CSP and
-`X-Frame-Options` from the HTML page. Cache-Control is varied through a
-`map` for that reason.
+Node 22, no dependencies at all — the server uses only `node:http` and
+`node:sqlite`, and Node strips the TypeScript annotations itself. Nothing
+to install means nothing to audit. It runs as a non-root user with a
+healthcheck on `/api/health`, which reports whether sync is enabled.
 
-> Built and served, but **not** exercised end-to-end in CI — there is no
-> Docker daemon in the environment this was developed in. The nginx config
-> and the port substitution are verified; the image build is not.
+HTTPS is not cosmetic here: Web Speech and OPFS both require a secure
+context, so the mic and persistence do not work from a plain `http://`
+LAN address.
 
-Two headers in `render.yaml` are load-bearing rather than decorative:
-`/assets/*` is `immutable` (Vite content-hashes those names, so it is safe
-and it is what makes repeat loads instant), and `sw.js` is `no-cache` — a
-cached service worker is a site that can never update itself again.
+Verify a build before trusting a deploy:
+
+```sh
+npm run test:hosted   # dist/ on a dumb static server + service worker
+npm run test:sync     # boots the real server, drives the app over a socket
+```
+
+`test:sync` is the tier that matters most: it runs the server exactly as
+the Dockerfile does. Node's strip-only TypeScript mode rejects things
+vitest's transpiler accepts, and that difference once shipped a container
+that crash-looped on boot while every unit test passed.
+
+> **A free-tier web service sleeps after ~15 minutes idle** and
+> cold-starts in roughly 50 seconds — and a sleeping service does not run
+> its sync schedule. Upgrade the instance if the automation matters more
+> than the cost.
 
 ---
 
@@ -213,8 +320,9 @@ wellness), goal setting with side-by-side formula estimates pinned to
 calculator.net's output, macro budgets, per-meal targets weighted by your
 own history, and weekly calorie cycling that conserves the weekly total.
 
-**Still not built, by design:** Garmin *API* sync, the adaptive TDEE
-model, the exercise logger, micronutrient UI, any recommendation engine.
+**Still not built, by design:** the adaptive TDEE model (it needs ~6
+weeks of clean logging before there is anything to fit), the exercise
+logger, micronutrient UI, any recommendation engine.
 
 ---
 

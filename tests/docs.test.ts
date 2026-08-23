@@ -208,8 +208,34 @@ describe('the memory bank stays accurate', () => {
   it('does not claim the app has no server, which stopped being true', () => {
     for (const [name, body] of Object.entries({
       'CLAUDE.md': CLAUDE_MD, 'PROGRESS.md': PROGRESS, 'ARCHITECTURE.md': ARCH_MD,
+      'README.md': ROOT_MD,
     })) {
       expect(body, name).not.toMatch(/there is no (backend|server)/i);
+    }
+  });
+
+  it('does not tell a reader to deploy this as a static site', () => {
+    // It was one, and the README went on saying so for two releases
+    // after it stopped being true - including "no server, no database,
+    // no environment secret and nothing to leak", which would send
+    // someone to create a service type that cannot run the sync API and
+    // that Render cannot convert afterwards. Found by reading, which is
+    // exactly what a drift guard is supposed to make unnecessary.
+    const deploying = ROOT_MD.slice(ROOT_MD.indexOf('## Deploying'));
+    const section = deploying.slice(0, deploying.indexOf('\n## ', 3));
+    expect(section).not.toMatch(/pick \*\*static site\*\*/i);
+    expect(section).not.toMatch(/nothing to leak/i);
+    expect(section).toMatch(/web service/i);
+  });
+
+  it('documents every environment variable the server actually reads', () => {
+    // A variable the server honours but nobody documents is a setting
+    // that only exists for whoever wrote it.
+    const config = read('server/src/config.ts');
+    const used = new Set([...config.matchAll(/env\.([A-Z][A-Z0-9_]+)/g)].map((m) => m[1]));
+    used.delete('PORT');   // supplied by the host, not by the operator
+    for (const name of used) {
+      expect(ROOT_MD, `undocumented environment variable: ${name}`).toContain(name);
     }
   });
 
