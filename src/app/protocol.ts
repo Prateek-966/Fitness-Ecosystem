@@ -5,6 +5,10 @@ import type { FoodSource } from '../core/foodimport';
 import type { UtteranceOutcome } from '../core/resolve';
 import type { SourceCoverage } from '../core/garmin';
 import type { SlotWindow } from '../core/mealslot';
+import type {
+  ActiveTarget, BodyProfile, MacroBudget, MealTarget, TargetSource, WeightProgress,
+} from '../core/energy';
+import type { DayPlan } from '../core/cycling';
 
 /**
  * Everything the UI needs to draw itself, fetched in one round trip.
@@ -29,6 +33,18 @@ export interface Snapshot {
   sourceCoverage: SourceCoverage[];
   /** Derived from your own timestamps. Empty until there is enough of them. */
   mealWindows: SlotWindow[];
+  /** Goal setting. Null profile means it has never been set up. */
+  profile: BodyProfile | null;
+  target: ActiveTarget | null;
+  targetSpread: Array<{ source: TargetSource; kcal: number; basis: string | null }>;
+  mealTargets: MealTarget[];
+  macros: MacroBudget | null;
+  weight: WeightProgress | null;
+  /** The current cycled week, if one has been planned. */
+  weekPlan: DayPlan[];
+  /** Today's actuals for the non-food goals. */
+  stepsToday: number | null;
+  waterToday: number;
   persistent: boolean;
 }
 
@@ -53,6 +69,11 @@ export type Request =
   | { method: 'importFood'; csv: string; source: FoodSource }
   | { method: 'importHealthify'; csv: string }
   | { method: 'importGarmin'; csv: string }
+  | { method: 'saveProfile'; profile: BodyProfile }
+  | { method: 'setManualTarget'; kcal: number | null }
+  | { method: 'planWeek' }
+  | { method: 'clearPlan' }
+  | { method: 'logWater'; glasses: number }
   | { method: 'exportDb' };
 
 export interface Envelope { id: number; req: Request }

@@ -318,7 +318,8 @@ CREATE TABLE daily_metric (
     log_date    TEXT NOT NULL,          -- local calendar day
     metric      TEXT NOT NULL,          -- 'sleep_min','rem_min','deep_min',
                                         -- 'rhr_bpm','hrv_ms','stress_avg',
-                                        -- 'body_battery_max','steps'
+                                        -- 'body_battery_max','steps',
+                                        -- 'water_glasses' (manual)
     source      TEXT NOT NULL CHECK (source IN ('garmin','manual')),
     value       REAL NOT NULL,
     recorded_at TEXT NOT NULL,
@@ -351,6 +352,81 @@ SELECT 'session_energy', 'session_kcal', se.source,
        MIN(date(ws.started_at)), MAX(date(ws.started_at)), COUNT(*)
 FROM session_energy se JOIN workout_session ws ON ws.id = se.session_id
 GROUP BY se.source;
+
+
+-- ------------------------------------------------------------
+-- 9c. GOAL SETTING
+--
+-- Owner-authorised addition: the brief listed goal setting as out of
+-- scope for v0, and the owner has since put it in scope.
+--
+-- body_profile is APPEND-ONLY, like log_revision and for the same
+-- reason: weight moves, and a target recomputed from today's weight
+-- must not silently rewrite what last month's target was. The newest
+-- row is current; the older ones are how you got here.
+-- ------------------------------------------------------------
+CREATE TABLE body_profile (
+    id              INTEGER PRIMARY KEY,
+    recorded_at     TEXT    NOT NULL,
+    -- Selects a formula coefficient set. These equations were fitted on
+    -- male/female cohorts and offer no other option; that is a property
+    -- of the published research, not a statement about people.
+    sex             TEXT    NOT NULL CHECK (sex IN ('male','female')),
+    age_years       REAL    NOT NULL,
+    height_cm       REAL    NOT NULL,
+    weight_kg       REAL    NOT NULL,
+    -- Null unless actually known. Katch-McArdle needs it and is skipped
+    -- without it, rather than run on a guessed body-fat figure.
+    body_fat_pct    REAL,
+    activity_factor REAL    NOT NULL,
+    -- Negative loses weight, positive gains, zero maintains.
+    goal_rate_kg_per_week REAL NOT NULL DEFAULT 0,
+    -- Where you are heading. Null means "no destination, just a rate".
+    goal_weight_kg  REAL
+);
+
+CREATE INDEX idx_body_profile_recorded ON body_profile (recorded_at DESC);
+
+
+-- Every formula that estimates a target gets its OWN ROW, exactly like
+-- session_energy. Three published equations disagree by a few hundred
+-- kcal on the same body; that disagreement is information, and averaging
+-- it away would be pretending to a precision none of them has.
+--
+-- Precedence is inverted relative to session_energy, deliberately.
+-- session_energy holds MEASUREMENTS of what happened, so the best
+-- instrument wins. energy_target holds DECISIONS about what should
+-- happen, so the user's own decision wins - the brief's eighth principle
+-- is that this app does what it is told and explains the consequence,
+-- rather than the other way round.
+CREATE TABLE energy_target (
+    log_date        TEXT NOT NULL,
+    source          TEXT NOT NULL
+                    CHECK (source IN ('manual','cycled','adaptive','mifflin','harris','katch')),
+    kcal            REAL NOT NULL,
+    -- How this number was arrived at, in words, so a target found in the
+    -- database six months from now still carries its own provenance.
+    basis           TEXT,
+    computed_at     TEXT NOT NULL,
+    PRIMARY KEY (log_date, source)
+);
+
+CREATE VIEW v_energy_target AS
+SELECT et.log_date, et.source, et.kcal, et.basis
+FROM energy_target et
+WHERE et.source = (
+    SELECT e2.source FROM energy_target e2
+    WHERE e2.log_date = et.log_date
+    ORDER BY CASE e2.source
+                 WHEN 'manual'   THEN 0   -- you said so
+                 WHEN 'cycled'   THEN 1   -- the week's total, redistributed
+                 WHEN 'adaptive' THEN 2   -- fitted to your own data (not built yet)
+                 WHEN 'mifflin'  THEN 3   -- population formulas, best first
+                 WHEN 'harris'   THEN 4
+                 WHEN 'katch'    THEN 5
+             END
+    LIMIT 1
+);
 
 
 -- ------------------------------------------------------------

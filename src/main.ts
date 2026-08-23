@@ -4,9 +4,9 @@ import { Mic, speechSupported } from './app/speech';
 import { h, clear, fmt } from './app/dom';
 import { toast } from './app/toast';
 import { absNow } from './core/clock';
-import { calibrateView, diagnosticsView, pendingView, todayView } from './app/views';
+import { calibrateView, diagnosticsView, goalView, pendingView, todayView } from './app/views';
 
-type Tab = 'today' | 'pending' | 'measures' | 'diagnostics';
+type Tab = 'today' | 'pending' | 'goal' | 'measures' | 'diagnostics';
 
 const root = document.getElementById('app')!;
 const mic = new Mic();
@@ -56,6 +56,7 @@ function render(): void {
 
   if (tab === 'today') root.append(micPanel(), todayView(ctx));
   else if (tab === 'pending') root.append(pendingView(ctx));
+  else if (tab === 'goal') root.append(goalView(ctx));
   else if (tab === 'measures') root.append(calibrateView(ctx));
   else root.append(diagnosticsView(ctx));
 }
@@ -70,6 +71,7 @@ function tabs(pendingCount: number): HTMLElement {
   return h('nav', { class: 'tabs' },
     mk('today', 'Today'),
     mk('pending', 'Queue', pendingCount),
+    mk('goal', 'Goal'),
     mk('measures', 'Measures'),
     mk('diagnostics', 'Diagnostics'));
 }

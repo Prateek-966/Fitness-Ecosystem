@@ -14,7 +14,12 @@ import { allSettings, setSetting } from '../core/settings';
 import { importHealthify, parseHealthifyCsv } from '../core/healthify';
 import { loadFoods, parseFoodCsv } from '../core/foodimport';
 import { importGarminCsv, sourceCoverage } from '../core/garmin';
-import { absNow, localDate } from '../core/clock';
+import {
+  activeTarget, allTargets, clearManualTarget, currentProfile, macroBudget,
+  mealTargets, saveProfile, setManualTarget, weightProgress, writeTargets,
+} from '../core/energy';
+import { clearPlan, planWeek, writePlan } from '../core/cycling';
+import { absNow, localDate, localIso } from '../core/clock';
 import type { Envelope, Reply, Request, Snapshot } from '../app/protocol';
 
 /**
@@ -54,13 +59,47 @@ function snapshot(): Snapshot {
     foodCount: db.get<{ n: number }>('SELECT COUNT(*) AS n FROM food')!.n,
     sourceCoverage: sourceCoverage(db),
     mealWindows: listWindows(db),
+    ...goalSnapshot(date),
     persistent,
+  };
+}
+
+/** Everything goal-related, assembled once so the UI gets it in one hop. */
+function goalSnapshot(date: string) {
+  const target = activeTarget(db, date);
+  const s = allSettings(db);
+  return {
+    profile: currentProfile(db),
+    target,
+    targetSpread: allTargets(db, date),
+    mealTargets: target ? mealTargets(db, target.kcal) : [],
+    macros: target
+      ? macroBudget(
+          target.kcal,
+          { proteinPct: s.macro_protein_pct, carbPct: s.macro_carb_pct, fatPct: s.macro_fat_pct },
+          s.fibre_g_per_1000kcal)
+      : null,
+    weight: weightProgress(db),
+    weekPlan: db.all<any>(
+      `SELECT log_date AS logDate, kcal, basis FROM energy_target
+       WHERE source = 'cycled' AND log_date >= ? ORDER BY log_date LIMIT 7`, [date])
+      .map((r) => ({ ...r, weight: 1, reasons: [] })),
+    stepsToday: db.get<{ value: number }>(
+      "SELECT value FROM v_daily_metric WHERE log_date = ? AND metric = 'steps'", [date])?.value
+      ?? null,
+    waterToday: db.get<{ value: number }>(
+      "SELECT value FROM v_daily_metric WHERE log_date = ? AND metric = 'water_glasses'", [date])
+      ?.value ?? 0,
   };
 }
 
 function refresh(): void {
   refreshAllStats(db);
   autoRefreshWindows(db);
+  // Today's target is recomputed from the current profile, so a new
+  // weight moves tomorrow's line without rewriting yesterday's.
+  const p = currentProfile(db);
+  if (p) writeTargets(db, p);
 }
 
 async function handle(req: Request): Promise<unknown> {
@@ -165,6 +204,52 @@ async function handle(req: Request): Promise<unknown> {
     case 'importGarmin': {
       const report = importGarminCsv(db, req.csv);
       return { report, snapshot: snapshot() };
+    }
+
+    case 'saveProfile': {
+      saveProfile(db, req.profile);
+      writeTargets(db, req.profile);
+      return snapshot();
+    }
+
+    case 'setManualTarget': {
+      if (req.kcal === null) clearManualTarget(db);
+      else setManualTarget(db, req.kcal);
+      return snapshot();
+    }
+
+    case 'planWeek': {
+      const t = activeTarget(db, localDate());
+      if (!t) return snapshot();
+      // Plan from the FLAT target, not from whatever is in force - otherwise
+      // each replan would cycle an already-cycled number and drift.
+      const flatRow = db.get<{ kcal: number }>(
+        `SELECT kcal FROM energy_target WHERE log_date = ?
+           AND source IN ('mifflin','harris','katch','manual')
+         ORDER BY CASE source WHEN 'manual' THEN 0 WHEN 'mifflin' THEN 1
+                              WHEN 'harris' THEN 2 ELSE 3 END LIMIT 1`,
+        [localDate()]);
+      const p = currentProfile(db);
+      const { plan } = planWeek(db, flatRow?.kcal ?? t.kcal, localDate(), 7, {
+        maxSwing: allSettings(db).max_cycle_swing,
+        sex: p?.sex,
+      });
+      writePlan(db, plan);
+      return snapshot();
+    }
+
+    case 'clearPlan':
+      clearPlan(db);
+      return snapshot();
+
+    case 'logWater': {
+      db.run(
+        `INSERT INTO daily_metric (log_date, metric, source, value, recorded_at)
+         VALUES (?, 'water_glasses', 'manual', ?, ?)
+         ON CONFLICT(log_date, metric, source) DO UPDATE SET
+           value = excluded.value, recorded_at = excluded.recorded_at`,
+        [localDate(), Math.max(0, req.glasses), localIso()]);
+      return snapshot();
     }
 
     case 'exportDb': {

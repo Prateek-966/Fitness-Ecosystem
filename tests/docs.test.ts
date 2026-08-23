@@ -113,3 +113,20 @@ describe('the docs are navigable', () => {
     }
   });
 });
+
+describe('the DOM helper respects the shipped CSP', () => {
+  it('never emits an inline style attribute', () => {
+    // style-src 'self' blocks inline style attributes but not CSSOM, so a
+    // style attribute would silently not apply. This is the one place the
+    // difference is easy to get wrong.
+    const dom = readFileSync(new URL('../src/app/dom.ts', import.meta.url), 'utf8');
+    expect(dom).toContain("el.style.setProperty");
+    expect(dom).not.toMatch(/setAttribute\(\s*['"]style['"]/);
+  });
+
+  it('has no style attributes written directly in the views', () => {
+    for (const f of ['src/app/views.ts', 'src/main.ts', 'index.html']) {
+      expect(read(f), f).not.toMatch(/\sstyle\s*=\s*["']/);
+    }
+  });
+});

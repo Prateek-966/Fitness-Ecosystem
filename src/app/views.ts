@@ -4,6 +4,10 @@ import { h, fmt } from './dom';
 import { field, sheet } from './sheet';
 import { toast } from './toast';
 import { normalise, parse } from '../core/parse';
+import {
+  ACTIVITY_LEVELS, GOAL_RATES, MACRO_PRESETS, estimateTargets, rateForGoal,
+  safetyCheck, type BodyProfile, type Sex,
+} from '../core/energy';
 
 /** Views draw from one snapshot; mutations go to the worker and hand back a new one. */
 export type Rerender = () => void;
@@ -36,19 +40,40 @@ export function todayView(ctx: Ctx): HTMLElement {
   const find = (n: string) => totals.nutrients.find((x) => x.nutrient === n);
   const kcal = find('kcal');
 
+  const target = ctx.snap.target;
+  const eaten = kcal?.total ?? 0;
+
   const head = h('div', { class: 'card intake' },
     h('div', { class: 'intake-main' },
       h('div', {},
-        h('div', { class: 'label', text: 'Intake index' }),
-        h('div', { class: 'intake-value', text: kcal ? fmt.kcal(kcal.total) : '0' }),
-        h('div', { class: 'err', text: kcal ? `plus or minus ${fmt.kcal(kcal.absError)}` : 'nothing logged yet' })),
+        h('div', { class: 'label', text: target ? 'Eaten of target' : 'Intake index' }),
+        h('div', { class: 'intake-value' },
+          fmt.kcal(eaten),
+          target ? h('span', { class: 'of-target', text: ` of ${fmt.kcal(target.kcal)}` }) : null),
+        h('div', { class: 'err', text: kcal
+          ? `plus or minus ${fmt.kcal(kcal.absError)}`
+          : 'nothing logged yet' })),
       h('div', { class: 'macro-grid' },
-        ...(['protein_g', 'carb_g', 'fat_g'] as const).map((n) => {
-          const m = find(n);
-          return h('div', { class: 'macro' },
-            h('div', { class: 'macro-name', text: n.replace('_g', '') }),
-            h('div', { class: 'macro-value', text: m ? `${Math.round(m.total)} g` : '—' }));
-        }))));
+        ...([['protein_g', 'proteinG'], ['carb_g', 'carbG'], ['fat_g', 'fatG']] as const)
+          .map(([nutrient, budgetKey]) => {
+            const m = find(nutrient);
+            const budget = ctx.snap.macros?.[budgetKey] ?? null;
+            return h('div', { class: 'macro' },
+              h('div', { class: 'macro-name', text: nutrient.replace('_g', '') }),
+              h('div', { class: 'macro-value', text: budget === null
+                ? (m ? `${Math.round(m.total)} g` : '—')
+                : `${Math.round(m?.total ?? 0)}/${budget}` }));
+          }))));
+
+  if (target) {
+    const pct = Math.max(0, Math.min(1, target.kcal > 0 ? eaten / target.kcal : 0));
+    head.append(h('div', { class: 'bar' },
+      h('div', { class: 'bar-fill', style: `width:${(pct * 100).toFixed(1)}%` })));
+    head.append(h('div', { class: 'sub', text:
+      eaten <= target.kcal
+        ? `${fmt.kcal(target.kcal - eaten)} left · target from ${target.source}`
+        : `${fmt.kcal(eaten - target.kcal)} over · target from ${target.source}` }));
+  }
 
   if (!totals.complete) {
     head.append(h('div', { class: 'incomplete' },
@@ -100,15 +125,22 @@ function mealSection(
 ): HTMLElement {
   const kcal = rows.reduce((sum, e) => sum + (e.kcal ?? 0), 0);
   const pending = rows.filter((e) => e.status !== 'resolved').length;
+  const mt = slot ? ctx.snap.mealTargets.find((m) => m.slot === slot) : undefined;
+  const mealTarget = mt ? mt.kcal : null;
 
   const header = h('div', { class: 'meal-head' },
     h('div', { class: 'grow' },
       h('div', { class: 'meal-name', text: slot ? SLOT_LABEL[slot] ?? slot : 'Logged' }),
       window
-        ? h('div', { class: 'sub mono', text: `usually ${hhmm(window.centreMin)}` })
+        ? h('div', { class: 'sub mono', text:
+            `usually ${hhmm(window.centreMin)}`
+            + (mt?.fromHistory ? ' · share from your history' : '') })
         : null),
-    // A total, not a target. What you ate, not what you are allowed.
-    h('div', { class: 'meal-kcal', text: rows.length ? fmt.kcal(kcal) : '' }),
+    h('div', { class: 'meal-kcal', text: mealTarget !== null
+      // "0 of 612" is honest once a target exists: 0 is what is logged.
+      // Without one it would just be a number invented to sit beside.
+      ? `${fmt.kcal(kcal)} of ${fmt.kcal(mealTarget)}`
+      : (rows.length ? fmt.kcal(kcal) : '') }),
     h('button', {
       class: 'add', title: slot ? `log to ${SLOT_LABEL[slot] ?? slot}` : 'log',
       text: '+',
@@ -587,4 +619,293 @@ export function diagnosticsView(ctx: Ctx): HTMLElement {
     })));
 
   return wrap;
+}
+
+
+// ------------------------------------------------------------------
+// GOAL
+//
+// Owner-authorised: the brief put goal setting out of scope for v0, and
+// the owner has since put it in.
+//
+// Modelled on calculator.net's calorie calculator and on the goal screen
+// the owner supplied, with one difference that matters: where those show
+// a single number, this shows every formula that could run. They disagree
+// by a couple of hundred kcal on the same body, and hiding that would
+// claim a precision none of them has.
+// ------------------------------------------------------------------
+export function goalView(ctx: Ctx): HTMLElement {
+  const p = ctx.snap.profile;
+  const wrap = h('div', {});
+
+  // ---- weight goal ----
+  const w = ctx.snap.weight;
+  if (w) {
+    const rows: HTMLElement[] = [
+      goalRow('Current weight', `${w.currentKg} kg`),
+      goalRow('Start weight', `${w.startKg} kg`),
+    ];
+    if (w.goalKg !== null) rows.push(goalRow('Goal weight', `${w.goalKg} kg`));
+    rows.push(goalRow(w.lostKg >= 0 ? 'Lost so far' : 'Gained so far',
+      `${Math.abs(w.lostKg)} kg${w.remainingKg !== null ? ` of ${Math.abs(w.lostKg) + w.remainingKg} kg` : ''}`));
+    if (w.weeksToGoal !== null) {
+      rows.push(goalRow('At this rate', `${w.weeksToGoal} weeks to go`));
+    }
+    const card = h('div', { class: 'card' }, h('ul', { class: 'list' }, ...rows));
+    if (w.rateContradictsGoal) {
+      card.append(h('div', { class: 'incomplete', text:
+        'Your goal weight lies the other side of your current weight from the rate you picked, '
+        + 'so there is no arrival date to compute. The rate is used as set.' }));
+    }
+    wrap.append(h('h2', { text: 'Weight goal' }), card);
+  }
+
+  // ---- the form ----
+  const sex = h('select', {},
+    ...(['male', 'female'] as Sex[]).map((v) => h('option', {
+      value: v, selected: p?.sex === v ? '' : null, text: v,
+    })));
+  const age = h('input', { type: 'number', min: '15', max: '80', step: '1', value: p?.ageYears ?? '' });
+  const height = h('input', { type: 'number', min: '80', max: '250', step: '0.5', value: p?.heightCm ?? '' });
+  const weight = h('input', { type: 'number', min: '25', max: '400', step: '0.1', value: p?.weightKg ?? '' });
+  const goalWeight = h('input', {
+    type: 'number', min: '25', max: '400', step: '0.1',
+    value: p?.goalWeightKg ?? '', placeholder: 'optional',
+  });
+  const bodyFat = h('input', {
+    type: 'number', min: '3', max: '70', step: '0.1',
+    value: p?.bodyFatPct ?? '', placeholder: 'only if measured',
+  });
+  const activity = h('select', {}, ...ACTIVITY_LEVELS.map((a) => h('option', {
+    value: String(a.factor),
+    selected: p && Math.abs(p.activityFactor - a.factor) < 1e-9 ? '' : null,
+    text: a.label,
+  })));
+  const goal = h('select', {}, ...GOAL_RATES.map((g) => h('option', {
+    value: String(g.rate),
+    selected: p && Math.abs(p.goalRateKgPerWeek - g.rate) < 1e-9 ? '' : null,
+    text: g.label,
+  })));
+
+  const preview = h('div', {});
+
+  const readForm = (): BodyProfile | null => {
+    if ([age.value, height.value, weight.value].some((v) => v === '')) return null;
+    return {
+      sex: sex.value as Sex,
+      ageYears: Number(age.value),
+      heightCm: Number(height.value),
+      weightKg: Number(weight.value),
+      bodyFatPct: bodyFat.value === '' ? null : Number(bodyFat.value),
+      activityFactor: Number(activity.value),
+      goalRateKgPerWeek: Number(goal.value),
+      goalWeightKg: goalWeight.value === '' ? null : Number(goalWeight.value),
+    };
+  };
+
+  const renderPreview = () => {
+    preview.replaceChildren();
+    const form = readForm();
+    if (!form) {
+      preview.append(h('p', { class: 'hint', text: 'Fill in age, height and weight to see the estimates.' }));
+      return;
+    }
+    const estimates = estimateTargets(form);
+    preview.append(h('ul', { class: 'list' }, ...estimates.map((e) => h('li', {},
+      h('span', { class: 'grow' },
+        h('div', { class: 'name', text: e.source }),
+        h('div', { class: 'sub mono', text: e.basis })),
+      h('span', { class: 'pill', text: `${e.percentOfMaintenance}%` }),
+      h('span', { class: 'kcal', text: fmt.kcal(e.target) })))));
+
+    const chosen = estimates[0];
+    if (chosen) {
+      const note = safetyCheck(form, chosen.target);
+      if (note.message) preview.append(h('div', { class: 'incomplete', text: note.message }));
+
+      if (form.goalWeightKg !== null && form.goalWeightKg !== undefined) {
+        const needed = rateForGoal(form.weightKg, form.goalWeightKg, 12);
+        preview.append(h('p', { class: 'hint', text:
+          `To reach ${form.goalWeightKg} kg in twelve weeks you would need `
+          + `${needed} kg/week. You have picked ${form.goalRateKgPerWeek}.` }));
+      }
+    }
+    if (!form.bodyFatPct) {
+      preview.append(h('p', {
+        class: 'hint',
+        text: 'Katch-McArdle is skipped because it needs a measured body-fat figure. Guessing one '
+            + 'to feed the single formula whose advantage is measured lean mass would be theatre.',
+      }));
+    }
+  };
+
+  for (const el of [sex, age, height, weight, goalWeight, bodyFat, activity, goal]) {
+    el.addEventListener('input', renderPreview);
+    el.addEventListener('change', renderPreview);
+  }
+
+  wrap.append(h('h2', { text: 'You' }));
+  wrap.append(h('div', { class: 'card' },
+    h('div', { class: 'row' }, field('Sex', sex), field('Age', age)),
+    h('div', { class: 'row' }, field('Height (cm)', height), field('Weight (kg)', weight)),
+    h('div', { class: 'row' }, field('Goal weight (kg)', goalWeight), field('Body fat %', bodyFat)),
+    field('Activity', activity),
+    field('Goal', goal),
+    h('div', { class: 'actions' },
+      h('button', {
+        class: 'btn primary', text: p ? 'Update' : 'Set goal',
+        onclick: () => {
+          const form = readForm();
+          if (!form) { toast('Age, height and weight are needed.', { tone: 'warn' }); return; }
+          void after(ctx, ctx.store.saveProfile(form), 'Goal saved.');
+        },
+      }))));
+
+  wrap.append(h('h2', { text: 'Estimates' }));
+  const estCard = h('div', { class: 'card' }, preview);
+  estCard.append(h('p', {
+    class: 'hint',
+    text: 'These are population regressions evaluated on one person. Mifflin-St Jeor predicts an '
+        + 'individual to roughly ±10%, and the formulas routinely differ by a couple of hundred '
+        + 'kcal on the same body — so each is kept separately and none is averaged with another. '
+        + 'A starting line, not a measurement of you.',
+  }));
+  wrap.append(estCard);
+
+  // ---- nutrition goal ----
+  const m = ctx.snap.macros;
+  if (m && ctx.snap.target) {
+    const preset = MACRO_PRESETS.find((x) =>
+      x.proteinPct === ctx.snap.settings.macro_protein_pct
+      && x.carbPct === ctx.snap.settings.macro_carb_pct
+      && x.fatPct === ctx.snap.settings.macro_fat_pct);
+
+    const card = h('div', { class: 'card' },
+      h('ul', { class: 'list' },
+        goalRow('Daily calorie budget', `${fmt.kcal(ctx.snap.target.kcal)} Cal`),
+        goalRow('Protein', `${m.proteinG} g`),
+        goalRow('Carb', `${m.carbG} g`),
+        goalRow('Fat', `${m.fatG} g`),
+        goalRow('Fibre', `${m.fibreG} g`)));
+
+    const split = h('select', {}, ...MACRO_PRESETS.map((x) => h('option', {
+      value: x.key, selected: preset?.key === x.key ? '' : null, text: x.label,
+    })));
+    split.addEventListener('change', () => {
+      const chosen = MACRO_PRESETS.find((x) => x.key === split.value)!;
+      void after(ctx, Promise.all([
+        ctx.store.setSetting('macro_protein_pct', chosen.proteinPct),
+        ctx.store.setSetting('macro_carb_pct', chosen.carbPct),
+        ctx.store.setSetting('macro_fat_pct', chosen.fatPct),
+      ]), `Split set to ${chosen.label}.`);
+    });
+    card.append(field('Macronutrient split', split));
+
+    if (m.splitSumsTo !== 100) {
+      card.append(h('div', { class: 'incomplete', text:
+        `Your split adds to ${m.splitSumsTo}%, not 100. The grams above use it exactly as set.` }));
+    }
+    card.append(h('p', { class: 'hint', text:
+      'Fibre scales with intake at 14 g per 1000 kcal rather than being a flat number.' }));
+    wrap.append(h('h2', { text: 'Nutrition goal' }), card);
+  }
+
+  // ---- calorie cycling ----
+  wrap.append(h('h2', { text: 'Spread across the week' }));
+  const cycleCard = h('div', { class: 'card' });
+  if (ctx.snap.weekPlan.length) {
+    cycleCard.append(h('ul', { class: 'list' }, ...ctx.snap.weekPlan.map((d) => h('li', {},
+      h('span', { class: 'grow' },
+        h('div', { class: 'name', text: d.logDate }),
+        h('div', { class: 'sub mono', text: d.basis })),
+      h('span', { class: 'kcal', text: fmt.kcal(d.kcal) })))));
+    const total = ctx.snap.weekPlan.reduce((s, d) => s + d.kcal, 0);
+    cycleCard.append(h('p', { class: 'hint mono', text: `week total ${fmt.kcal(total)} kcal` }));
+  } else {
+    cycleCard.append(h('div', { class: 'empty quiet', text: 'Not planned — every day gets the flat target.' }));
+  }
+  cycleCard.append(h('div', { class: 'actions' },
+    h('button', {
+      class: 'btn', text: 'Clear',
+      onclick: () => void after(ctx, ctx.store.clearPlan(), 'Back to a flat week.'),
+    }),
+    h('button', {
+      class: 'btn primary', text: 'Plan the week',
+      onclick: () => {
+        if (!ctx.snap.target) { toast('Set a goal first.', { tone: 'warn' }); return; }
+        void after(ctx, ctx.store.planWeek(), 'Week planned.');
+      },
+    })));
+  cycleCard.append(h('p', { class: 'hint', text:
+    'The same weekly total, redistributed. Training days and days your watch says you recovered '
+    + 'badly get more; well-rested days take the deeper deficit. The week always sums to what a '
+    + 'flat week would have been, so this changes when the calories fall, never how many.' }));
+  cycleCard.append(h('p', { class: 'hint', text:
+    'A transparent weighted sum, not a black box — each day says which input moved it and by how '
+    + 'much, so a suggestion you disagree with can be argued with. That training days need more '
+    + 'fuel is uncontroversial; that HRV and sleep should shift intake is plausible and widely '
+    + 'practised but not established, which is why the swing is capped and can be set to zero.' }));
+  wrap.append(cycleCard);
+
+  // ---- water and steps ----
+  const waterGoal = ctx.snap.settings.water_goal_glasses;
+  const water = ctx.snap.waterToday;
+  const stepsGoal = ctx.snap.settings.steps_goal;
+  const steps = ctx.snap.stepsToday;
+
+  wrap.append(h('h2', { text: 'Other goals' }));
+  wrap.append(h('div', { class: 'card' },
+    h('ul', { class: 'list' },
+      h('li', {},
+        h('span', { class: 'grow' },
+          h('div', { class: 'name', text: 'Water' }),
+          h('div', { class: 'sub', text: `${water} of ${waterGoal} glasses` })),
+        h('button', { class: 'btn', text: '−', onclick: () =>
+          void after(ctx, ctx.store.logWater(Math.max(0, water - 1)), 'Water updated.') }),
+        h('button', { class: 'add', text: '+', onclick: () =>
+          void after(ctx, ctx.store.logWater(water + 1), 'Water updated.') })),
+      h('li', {},
+        h('span', { class: 'grow' },
+          h('div', { class: 'name', text: 'Steps' }),
+          h('div', { class: 'sub', text: steps === null
+            ? `goal ${stepsGoal.toLocaleString()} — import Garmin to fill this in`
+            : `${Math.round(steps).toLocaleString()} of ${stepsGoal.toLocaleString()}` })))),
+    h('p', { class: 'hint', text:
+      'Steps come from your watch; water is the one thing here you tell the app. Neither affects '
+      + 'the intake total.' })));
+
+  // ---- override ----
+  const manual = h('input', {
+    type: 'number', min: '500', max: '8000', step: '10',
+    value: ctx.snap.target?.source === 'manual' ? ctx.snap.target.kcal : '',
+    placeholder: 'e.g. 2200',
+  });
+  wrap.append(h('h2', { text: 'Override' }));
+  wrap.append(h('div', { class: 'card' },
+    field('Set the target by hand', manual),
+    h('div', { class: 'actions' },
+      h('button', {
+        class: 'btn', text: 'Use formula',
+        onclick: () => void after(ctx, ctx.store.setManualTarget(null), 'Back to the formula.'),
+      }),
+      h('button', {
+        class: 'btn primary', text: 'Use this number',
+        onclick: () => {
+          if (manual.value === '') return;
+          void after(ctx, ctx.store.setManualTarget(Number(manual.value)), 'Target set.');
+        },
+      })),
+    h('p', { class: 'hint', text:
+      'A number you set outranks every formula and the cycled plan, and the estimates are kept '
+      + 'beside it rather than deleted. If it sits below the safe floor you are told once, and '
+      + 'then it is used exactly as entered.' })));
+
+  renderPreview();
+  return wrap;
+}
+
+function goalRow(label: string, value: string): HTMLElement {
+  return h('li', {},
+    h('span', { class: 'grow' }, h('div', { class: 'name', text: label })),
+    h('span', { class: 'kcal', text: value }));
 }

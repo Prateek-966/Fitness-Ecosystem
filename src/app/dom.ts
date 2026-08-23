@@ -10,6 +10,22 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined || v === false) continue;
     if (k === 'class') el.className = String(v);
+    else if (k === 'style') {
+      // Routed through CSSOM rather than setAttribute. The page ships a
+      // CSP with style-src 'self', which blocks inline style ATTRIBUTES
+      // but not scripted style properties - so an attribute here would
+      // silently not apply, which is worse than failing loudly.
+      if (typeof v === 'string') {
+        for (const decl of v.split(';')) {
+          const [prop, ...rest] = decl.split(':');
+          if (prop?.trim() && rest.length) el.style.setProperty(prop.trim(), rest.join(':').trim());
+        }
+      } else {
+        for (const [prop, val] of Object.entries(v as Record<string, string>)) {
+          el.style.setProperty(prop, String(val));
+        }
+      }
+    }
     else if (k === 'text') el.textContent = String(v);
     else if (k.startsWith('on') && typeof v === 'function') {
       el.addEventListener(k.slice(2).toLowerCase(), v as EventListener);

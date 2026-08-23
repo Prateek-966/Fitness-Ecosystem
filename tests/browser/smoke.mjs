@@ -143,6 +143,59 @@ check('Garmin data does not move the intake total',
       intakeAfter.replace(/\n/g, ' '));
 await page.click('nav.tabs button:has-text("Diagnostics")');
 
+// --- goal setting, against calculator.net's published figures ---
+await page.click('nav.tabs button:has-text("Goal")');
+await page.selectOption('.card:has-text("Activity") select >> nth=0', 'male');
+const setNum = async (label, value) => {
+  await page.fill(`.card:has-text("Activity") .field:has-text("${label}") input`, value);
+};
+await setNum('Age', '25');
+await setNum('Height (cm)', '180');
+await setNum('Weight (kg)', '65');
+await setNum('Goal weight (kg)', '60');
+await page.selectOption('.field:has-text("Activity") select', '1.465');
+await page.selectOption('.field:has-text("Goal") select', '-0.5');
+await page.waitForTimeout(400);
+
+const estimates = await page.locator('.card:has-text("mifflin")').first().innerText();
+check('BMR estimates match calculator.net', /1,?925/.test(estimates) && /79%/.test(estimates),
+      (estimates.match(/mifflin[\s\S]{0,120}/) ?? [''])[0].replace(/\n/g, ' ').slice(0, 110));
+
+await page.click('.card:has-text("Activity") button:has-text("Set goal"), .card:has-text("Activity") button:has-text("Update")');
+await page.waitForTimeout(500);
+
+const nutrition = await page.locator('.card:has-text("Daily calorie budget")').innerText();
+check('macro budget is derived from the target',
+      /1,?925/.test(nutrition) && /Protein/.test(nutrition),
+      nutrition.replace(/\n/g, ' ').slice(0, 100));
+
+const weightCard = await page.locator('.card:has-text("Current weight")').innerText();
+check('weight goal tracks toward the target weight', /60 kg/.test(weightCard),
+      weightCard.replace(/\n/g, ' ').slice(0, 90));
+
+// --- calorie cycling conserves the week ---
+await page.click('button:has-text("Plan the week")');
+await page.waitForTimeout(600);
+const cycle = await page.locator('.card:has-text("week total")').innerText();
+const weekTotal = Number((cycle.match(/week total ([\d,]+)/) ?? [])[1]?.replace(/,/g, ''));
+check('a planned week sums to the flat week', Math.abs(weekTotal - 1925 * 7) <= 7,
+      `${weekTotal} vs ${1925 * 7}`);
+
+// --- water is the one manual tracker ---
+await page.click('.card:has-text("Water") button.add');
+await page.waitForTimeout(400);
+const other = await page.locator('.card:has-text("Water")').innerText();
+check('water logs by hand', /1 of 8 glasses/.test(other),
+      (other.match(/\d+ of \d+ glasses/) ?? [''])[0]);
+
+// --- the target reaches Today ---
+await page.click('nav.tabs button:has-text("Today")');
+await page.waitForTimeout(300);
+const todayIntake = await page.locator('.intake').innerText();
+check('Today shows eaten against target', /of\s+1,?9\d\d/.test(todayIntake),
+      todayIntake.replace(/\n/g, ' ').slice(0, 80));
+await page.click('nav.tabs button:has-text("Diagnostics")');
+
 // --- backup: the whole database leaves as one SQLite file ---
 const [download] = await Promise.all([
   page.waitForEvent('download', { timeout: 10000 }),

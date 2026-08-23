@@ -6,6 +6,7 @@ import type { FoodSource } from '../core/foodimport';
 import type { LoadReport } from '../core/foodimport';
 import type { ImportReport } from '../core/healthify';
 import type { GarminReport } from '../core/garmin';
+import type { BodyProfile } from '../core/energy';
 
 /**
  * Main-thread handle on the database worker.
@@ -132,6 +133,26 @@ export class Store {
       { method: 'importGarmin', csv },
     ));
     return r.report;
+  }
+
+  async saveProfile(profile: BodyProfile): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'saveProfile', profile });
+  }
+
+  async setManualTarget(kcal: number | null): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'setManualTarget', kcal });
+  }
+
+  async planWeek(): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'planWeek' });
+  }
+
+  async clearPlan(): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'clearPlan' });
+  }
+
+  async logWater(glasses: number): Promise<void> {
+    this.current = await this.send<Snapshot>({ method: 'logWater', glasses });
   }
 
   exportBytes(): Promise<Uint8Array | null> {

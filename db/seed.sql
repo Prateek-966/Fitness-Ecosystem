@@ -48,3 +48,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_food_identity
     ON food (name, COALESCE(brand, ''), source, COALESCE(source_ref, ''));
 CREATE UNIQUE INDEX IF NOT EXISTS ux_workout_session
     ON workout_session (started_at, COALESCE(kind, ''));
+INSERT OR IGNORE INTO app_setting (key, value) VALUES
+    ('macro_protein_pct',    '20'),
+    ('macro_carb_pct',       '50'),
+    ('macro_fat_pct',        '30'),
+    ('fibre_g_per_1000kcal', '14'),
+    ('water_goal_glasses',   '8'),
+    ('steps_goal',           '10000'),
+    ('max_cycle_swing',      '0.2');

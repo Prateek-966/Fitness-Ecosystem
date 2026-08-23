@@ -213,8 +213,8 @@ fact to store, not a conflict to settle at write time.
 | Column | Notes |
 |---|---|
 | `log_date` | local calendar day |
-| `metric` | `sleep_min`, `rem_min`, `deep_min`, `rhr_bpm`, `hrv_ms`, `stress_avg`, `body_battery_max`, `steps` |
-| `source` | `garmin` \| `manual` |
+| `metric` | `sleep_min`, `rem_min`, `deep_min`, `rhr_bpm`, `hrv_ms`, `stress_avg`, `body_battery_max`, `steps`, `water_glasses` |
+| `source` | `garmin` \| `manual` (water is the only thing typed in by hand) |
 | `value` | the measurement |
 
 `v_daily_metric` emits exactly one row per (day, metric), preferring
@@ -232,6 +232,70 @@ residuals.
 import idempotent. `COALESCE` for the third time, for the third reason
 (SCHEMA §3, §12): a NULL `kind` would otherwise defeat a plain UNIQUE and
 duplicate every workout in a re-exported month.
+
+## 9c. `body_profile`, `energy_target` — goal setting
+
+> Owner-authorised addition. The brief listed goal setting as out of scope
+> for v0; the owner has since put it in scope.
+
+`body_profile` is **append-only**, like `log_revision` and for the same
+reason: weight moves, and recomputing today's target from today's weight
+must not silently rewrite what last month's target was. The newest row is
+current; the older ones are how you got here, and `weightProgress()` reads
+start and current straight off that history rather than keeping a separate
+"start weight" that would eventually disagree with it.
+
+| Column | Notes |
+|---|---|
+| `sex` | selects a formula coefficient set — a property of the published research, not a statement about people |
+| `age_years`, `height_cm`, `weight_kg` | the formula inputs |
+| `body_fat_pct` | null unless measured; Katch-McArdle is skipped without it |
+| `activity_factor` | a plain number, so any preset can be overridden |
+| `goal_rate_kg_per_week` | negative loses, positive gains, zero maintains |
+| `goal_weight_kg` | null means a rate with no destination |
+
+`energy_target` gives **every formula its own row**, exactly like
+`session_energy`. Three published equations disagree by a couple of
+hundred kcal on the same body; that disagreement is information, and
+averaging it away would claim a precision none of them has.
+
+| `source` | Meaning |
+|---|---|
+| `manual` | you set it by hand |
+| `cycled` | the week's total, redistributed across its days (§9d) |
+| `adaptive` | fitted to your own intake-vs-weight data (**not built**) |
+| `mifflin` / `harris` / `katch` | population formulas |
+
+`v_energy_target` emits exactly one row per day in that precedence order.
+
+> **The precedence is inverted relative to `session_energy`, deliberately.**
+> `session_energy` holds *measurements* of what happened, so the best
+> instrument wins. `energy_target` holds *decisions* about what should
+> happen, so the user's own decision wins — the brief's eighth principle
+> is that this app does what it is told and explains the consequence,
+> rather than the other way round.
+
+## 9d. Calorie cycling
+
+`planWeek()` redistributes a week's calories across its days using
+`v_session_energy` (training load) and `v_daily_metric` (sleep, HRV,
+stress), against **your own** rolling baselines rather than population
+norms.
+
+Two properties are not negotiable, and both are asserted by tests:
+
+1. **The weekly total is conserved.** Cycling changes *when* the calories
+   fall, never *how many*. The one exception is the safety floor, which
+   may raise a day — and the caller is told it happened.
+2. **Every number is explainable.** A transparent weighted sum with
+   published weights and a per-day sentence naming which input moved it.
+   An app whose thesis is "the number should be honest about where it came
+   from" cannot then produce its most consequential number from a black
+   box.
+
+A missing metric contributes **nothing** — "the watch was on the charger"
+is not "an average night". Setting `max_cycle_swing` to 0 disables cycling
+entirely.
 
 ## 10. `capture_timing`
 
@@ -255,6 +319,13 @@ redeploy to change never gets tuned. All are editable in the app.
 | `min_match_margin` | `0.05` | a win this close to its runner-up is not a win |
 | `undo_window_ms` | `5000` | how long the undo toast lives |
 | `target_capture_ms` | `3000` | criterion 1's target |
+| `macro_protein_pct` | `20` | macronutrient split, percent of energy |
+| `macro_carb_pct` | `50` | the "balanced" preset commercial trackers ship |
+| `macro_fat_pct` | `30` | a convention, not a finding — hence editable |
+| `fibre_g_per_1000kcal` | `14` | fibre scales with intake, rather than being flat |
+| `water_goal_glasses` | `8` | logged manually into `daily_metric` |
+| `steps_goal` | `10000` | actuals come from the watch |
+| `max_cycle_swing` | `0.2` | how far a day may move from flat. 0 disables cycling |
 
 ## 12. `imported_entry` — Healthify history
 
