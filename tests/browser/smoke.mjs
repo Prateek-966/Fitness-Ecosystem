@@ -206,6 +206,34 @@ const magic = dlPath ? (await import('node:fs')).readFileSync(dlPath).subarray(0
 check('backup is a real SQLite database', magic.startsWith('SQLite format 3'),
       `${download.suggestedFilename()} · "${magic.replace(/\0/g, '')}"`);
 
+// --- the food picker overlays what is under it, and is readable ---
+//
+// backdrop-filter creates a stacking context, so the card BELOW the
+// capture card painted over the suggestion list regardless of the
+// list's own z-index - the dropdown was visibly behind the intake
+// totals. A z-index in a stylesheet looks correct while being wrong,
+// so this asserts what the browser actually hit-tests.
+await page.click('nav.tabs button:has-text("Today")');
+await page.fill('.capture input[type=text]', 'rot');
+await page.waitForSelector('.suggest[data-open="1"] li', { timeout: 5000 });
+
+const picker = await page.evaluate(() => {
+  const li = document.querySelector('.suggest li');
+  if (!li) return { topmost: false, opaque: false };
+  const r = li.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  const bg = getComputedStyle(document.querySelector('.suggest')).backgroundColor;
+  const alpha = /rgba?\([^)]*?([\d.]+)\s*\)$/.exec(bg);
+  return {
+    topmost: Boolean(hit && hit.closest('.suggest')),
+    // Fully opaque reports as rgb(...) with no alpha at all.
+    opaque: !alpha || Number(alpha[1]) >= 0.9,
+  };
+});
+check('the food picker is on top of what it overlaps', picker.topmost);
+check('the food picker is opaque enough to read over a card', picker.opaque);
+await page.fill('.capture input[type=text]', '');
+
 // --- CSP made it into the built page ---
 const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
 check('CSP is present in the built page', Boolean(csp && csp.includes("default-src 'self'")),
