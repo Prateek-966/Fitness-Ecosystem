@@ -851,3 +851,657 @@ SELECT
 FROM decision_log
 WHERE verdict IS NOT NULL
 GROUP BY kind;
+
+
+-- ------------------------------------------------------------
+-- 20. REPLICATION
+--
+-- The browser stays the store of record and the write path: principle 2
+-- says capture never blocks, and a network round trip on the way to
+-- committing an utterance is exactly the block it forbids. Replication
+-- is therefore something that happens AFTER a write has already landed
+-- locally, never something a write waits for.
+--
+-- What this buys, and it is worth stating because it changes the threat
+-- model: your history stops being one cleared cache away from gone, and
+-- becomes queryable with SQL from anywhere. The cost, equally plainly:
+-- months of your health data sit in a hosted Postgres in readable form.
+-- The owner chose that with the trade stated.
+--
+-- CHANGES ARE CAPTURED BY TRIGGER, not by instrumenting each mutation.
+-- Every write path in this application - the capture path, the slow
+-- path, revisions, recalibration, imports, the Garmin pull, the CLI -
+-- would otherwise each have to remember to record itself, and the one
+-- that forgets loses data silently and invisibly. A trigger cannot be
+-- forgotten by a future write path that does not know it exists.
+--
+-- app_secret is NOT replicated and has no trigger. The sync bearer
+-- token must not leave this device, and the way to guarantee that is
+-- for no mechanism to exist that could carry it.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS change_log (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name  TEXT NOT NULL,
+    row_id      TEXT NOT NULL,          -- TEXT: some tables key on a date
+    op          TEXT NOT NULL CHECK (op IN ('upsert','delete')),
+    changed_at  TEXT NOT NULL,
+    -- Set once the row has been accepted upstream. NULL means outstanding.
+    pushed_at   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_pending
+    ON change_log (seq) WHERE pushed_at IS NULL;
+
+-- Collapse repeats: editing one entry ten times before a sync should
+-- push one row, not ten. The push reads the row's CURRENT state anyway,
+-- so older entries for the same row carry no information.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_change_row
+    ON change_log (table_name, row_id) WHERE pushed_at IS NULL;
+
+-- Generated triggers. Do not edit by hand: run npm run gen:replica.
+--
+-- One per table per operation - SQLite has no statement-level or
+-- multi-table triggers, so this is verbose by necessity. Capturing
+-- changes by trigger rather than by instrumenting each mutation is what
+-- makes a write path that does not know replication exists still get
+-- replicated.
+
+CREATE TRIGGER IF NOT EXISTS trg_app_setting_insert_repl
+AFTER INSERT ON app_setting BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('app_setting', CAST(NEW.key AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_app_setting_update_repl
+AFTER UPDATE ON app_setting BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('app_setting', CAST(NEW.key AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_app_setting_delete_repl
+AFTER DELETE ON app_setting BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('app_setting', CAST(OLD.key AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_body_profile_insert_repl
+AFTER INSERT ON body_profile BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('body_profile', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_body_profile_update_repl
+AFTER UPDATE ON body_profile BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('body_profile', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_body_profile_delete_repl
+AFTER DELETE ON body_profile BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('body_profile', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_capture_timing_insert_repl
+AFTER INSERT ON capture_timing BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('capture_timing', CAST(NEW.utterance_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_capture_timing_update_repl
+AFTER UPDATE ON capture_timing BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('capture_timing', CAST(NEW.utterance_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_capture_timing_delete_repl
+AFTER DELETE ON capture_timing BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('capture_timing', CAST(OLD.utterance_id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_logging_stats_insert_repl
+AFTER INSERT ON daily_logging_stats BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_logging_stats', CAST(NEW.log_date AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_logging_stats_update_repl
+AFTER UPDATE ON daily_logging_stats BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_logging_stats', CAST(NEW.log_date AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_logging_stats_delete_repl
+AFTER DELETE ON daily_logging_stats BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_logging_stats', CAST(OLD.log_date AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_metric_insert_repl
+AFTER INSERT ON daily_metric BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_metric', CAST(NEW.log_date AS TEXT) || '|' || CAST(NEW.metric AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_metric_update_repl
+AFTER UPDATE ON daily_metric BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_metric', CAST(NEW.log_date AS TEXT) || '|' || CAST(NEW.metric AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_daily_metric_delete_repl
+AFTER DELETE ON daily_metric BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('daily_metric', CAST(OLD.log_date AS TEXT) || '|' || CAST(OLD.metric AS TEXT) || '|' || CAST(OLD.source AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_decision_log_insert_repl
+AFTER INSERT ON decision_log BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('decision_log', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_decision_log_update_repl
+AFTER UPDATE ON decision_log BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('decision_log', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_decision_log_delete_repl
+AFTER DELETE ON decision_log BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('decision_log', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_energy_target_insert_repl
+AFTER INSERT ON energy_target BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('energy_target', CAST(NEW.log_date AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_energy_target_update_repl
+AFTER UPDATE ON energy_target BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('energy_target', CAST(NEW.log_date AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_energy_target_delete_repl
+AFTER DELETE ON energy_target BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('energy_target', CAST(OLD.log_date AS TEXT) || '|' || CAST(OLD.source AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_insert_repl
+AFTER INSERT ON food BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_update_repl
+AFTER UPDATE ON food BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_delete_repl
+AFTER DELETE ON food BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_nutrient_insert_repl
+AFTER INSERT ON food_nutrient BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_nutrient', CAST(NEW.food_id AS TEXT) || '|' || CAST(NEW.nutrient AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_nutrient_update_repl
+AFTER UPDATE ON food_nutrient BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_nutrient', CAST(NEW.food_id AS TEXT) || '|' || CAST(NEW.nutrient AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_nutrient_delete_repl
+AFTER DELETE ON food_nutrient BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_nutrient', CAST(OLD.food_id AS TEXT) || '|' || CAST(OLD.nutrient AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_unit_insert_repl
+AFTER INSERT ON food_unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_unit', CAST(NEW.food_id AS TEXT) || '|' || CAST(NEW.unit_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_unit_update_repl
+AFTER UPDATE ON food_unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_unit', CAST(NEW.food_id AS TEXT) || '|' || CAST(NEW.unit_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_food_unit_delete_repl
+AFTER DELETE ON food_unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('food_unit', CAST(OLD.food_id AS TEXT) || '|' || CAST(OLD.unit_id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_imported_entry_insert_repl
+AFTER INSERT ON imported_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('imported_entry', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_imported_entry_update_repl
+AFTER UPDATE ON imported_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('imported_entry', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_imported_entry_delete_repl
+AFTER DELETE ON imported_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('imported_entry', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_entry_insert_repl
+AFTER INSERT ON log_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_entry', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_entry_update_repl
+AFTER UPDATE ON log_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_entry', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_entry_delete_repl
+AFTER DELETE ON log_entry BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_entry', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_revision_insert_repl
+AFTER INSERT ON log_revision BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_revision', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_revision_update_repl
+AFTER UPDATE ON log_revision BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_revision', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_log_revision_delete_repl
+AFTER DELETE ON log_revision BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('log_revision', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_match_audit_insert_repl
+AFTER INSERT ON match_audit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('match_audit', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_match_audit_update_repl
+AFTER UPDATE ON match_audit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('match_audit', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_match_audit_delete_repl
+AFTER DELETE ON match_audit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('match_audit', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_insert_repl
+AFTER INSERT ON meal BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_update_repl
+AFTER UPDATE ON meal BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_delete_repl
+AFTER DELETE ON meal BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_component_insert_repl
+AFTER INSERT ON meal_component BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_component', CAST(NEW.meal_id AS TEXT) || '|' || CAST(NEW.food_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_component_update_repl
+AFTER UPDATE ON meal_component BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_component', CAST(NEW.meal_id AS TEXT) || '|' || CAST(NEW.food_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_component_delete_repl
+AFTER DELETE ON meal_component BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_component', CAST(OLD.meal_id AS TEXT) || '|' || CAST(OLD.food_id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_slot_window_insert_repl
+AFTER INSERT ON meal_slot_window BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_slot_window', CAST(NEW.slot AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_slot_window_update_repl
+AFTER UPDATE ON meal_slot_window BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_slot_window', CAST(NEW.slot AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_meal_slot_window_delete_repl
+AFTER DELETE ON meal_slot_window BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('meal_slot_window', CAST(OLD.slot AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_phrase_index_insert_repl
+AFTER INSERT ON phrase_index BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('phrase_index', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_phrase_index_update_repl
+AFTER UPDATE ON phrase_index BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('phrase_index', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_phrase_index_delete_repl
+AFTER DELETE ON phrase_index BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('phrase_index', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_satiety_rating_insert_repl
+AFTER INSERT ON satiety_rating BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('satiety_rating', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_satiety_rating_update_repl
+AFTER UPDATE ON satiety_rating BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('satiety_rating', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_satiety_rating_delete_repl
+AFTER DELETE ON satiety_rating BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('satiety_rating', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_session_energy_insert_repl
+AFTER INSERT ON session_energy BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('session_energy', CAST(NEW.session_id AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_session_energy_update_repl
+AFTER UPDATE ON session_energy BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('session_energy', CAST(NEW.session_id AS TEXT) || '|' || CAST(NEW.source AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_session_energy_delete_repl
+AFTER DELETE ON session_energy BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('session_energy', CAST(OLD.session_id AS TEXT) || '|' || CAST(OLD.source AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_undone_utterance_insert_repl
+AFTER INSERT ON undone_utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('undone_utterance', CAST(NEW.utterance_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_undone_utterance_update_repl
+AFTER UPDATE ON undone_utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('undone_utterance', CAST(NEW.utterance_id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_undone_utterance_delete_repl
+AFTER DELETE ON undone_utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('undone_utterance', CAST(OLD.utterance_id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_unit_insert_repl
+AFTER INSERT ON unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('unit', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_unit_update_repl
+AFTER UPDATE ON unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('unit', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_unit_delete_repl
+AFTER DELETE ON unit BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('unit', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_user_measure_insert_repl
+AFTER INSERT ON user_measure BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('user_measure', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_user_measure_update_repl
+AFTER UPDATE ON user_measure BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('user_measure', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_user_measure_delete_repl
+AFTER DELETE ON user_measure BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('user_measure', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_utterance_insert_repl
+AFTER INSERT ON utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('utterance', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_utterance_update_repl
+AFTER UPDATE ON utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('utterance', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_utterance_delete_repl
+AFTER DELETE ON utterance BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('utterance', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_workout_session_insert_repl
+AFTER INSERT ON workout_session BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('workout_session', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_workout_session_update_repl
+AFTER UPDATE ON workout_session BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('workout_session', CAST(NEW.id AS TEXT), 'upsert', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_workout_session_delete_repl
+AFTER DELETE ON workout_session BEGIN
+    INSERT INTO change_log (table_name, row_id, op, changed_at)
+    VALUES ('workout_session', CAST(OLD.id AS TEXT), 'delete', datetime('now'))
+    ON CONFLICT(table_name, row_id) WHERE pushed_at IS NULL
+    DO UPDATE SET op = excluded.op, changed_at = excluded.changed_at;
+END;

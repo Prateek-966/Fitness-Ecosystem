@@ -18,6 +18,12 @@ export interface Config {
   intervalMin: number;
   dbPath: string;
   staticDir: string;
+  /**
+   * Null means replication is DISABLED, not open - exactly like
+   * syncToken. The app is served and everything local still works;
+   * only /api/replica refuses.
+   */
+  supabase: { url: string; serviceKey: string } | null;
 }
 
 export class ConfigError extends Error {}
@@ -66,7 +72,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     intervalMin,
     dbPath: env.SYNC_DB?.trim() || './data/sync.sqlite3',
     staticDir: env.STATIC_DIR?.trim() || './dist',
+    supabase: supabaseConfig(env),
   };
+}
+
+/**
+ * Replication config, or null.
+ *
+ * Both halves or neither: a URL with no key, or a key with no URL, is a
+ * half-configured service that fails on the first push rather than at
+ * boot, and the error there names PostgREST rather than the mistake.
+ *
+ * The SERVICE key is required, not the anon key - the replica denies
+ * anon everything by design. Refusing an obviously-anon key here turns
+ * a confusing empty result set into a message that says what is wrong.
+ */
+function supabaseConfig(env: NodeJS.ProcessEnv): Config['supabase'] {
+  const url = env.SUPABASE_URL?.trim();
+  const serviceKey = env.SUPABASE_SERVICE_KEY?.trim();
+  if (!url && !serviceKey) return null;
+  if (!url || !serviceKey) {
+    throw new ConfigError(
+      'SUPABASE_URL and SUPABASE_SERVICE_KEY must both be set, or neither. '
+      + `Currently ${url ? 'the key' : 'the URL'} is missing.`);
+  }
+  if (!/^https:\/\//.test(url)) {
+    throw new ConfigError('SUPABASE_URL must be an https:// URL');
+  }
+  return { url, serviceKey };
 }
 
 /** Constant-time compare, so a wrong token cannot be found byte by byte. */

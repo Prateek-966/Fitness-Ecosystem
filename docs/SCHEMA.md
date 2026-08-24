@@ -537,3 +537,63 @@ person, while advice that happened to work three times is what chance
 looks like at that sample size. It never silently rewrites the rules —
 an application whose thesis is provenance cannot start tuning itself
 invisibly.
+
+## 20. `change_log` — replication
+
+The browser stays the store of record **and the write path**. Principle
+2 says capture never blocks, and a network round trip on the way to
+committing an utterance is exactly the block it forbids. Replication is
+something that happens *after* a write has already landed locally, never
+something a write waits for. Turn the network off and the app is
+unaffected.
+
+**What it buys, and what it costs.** Your history stops being one
+cleared cache away from gone, and becomes queryable with SQL from
+anywhere. The cost, stated because the owner chose it with the trade in
+front of them: months of health data sit in a hosted Postgres in
+readable form, protected by a key and default-deny row-level security
+rather than by encryption.
+
+### Captured by trigger, not by instrumentation
+
+Every write path — capture, the slow path, revisions, recalibration,
+imports, the Garmin pull, the CLI — would otherwise each have to
+remember to record itself, and the one that forgets loses data silently.
+A trigger cannot be forgotten by a future write path that does not know
+replication exists.
+
+| Column | Note |
+|---|---|
+| `row_id` | Every primary-key column, joined by `\|`. Keying on the first alone made two genuinely different rows of a composite-key table collide, and the unique index then dropped one silently. |
+| `op` | `upsert` or `delete`. |
+| `pushed_at` | NULL means outstanding. |
+
+`ux_change_row` on `(table_name, row_id) WHERE pushed_at IS NULL`
+collapses repeats: editing one entry ten times before a sync pushes one
+row, not ten. The log deliberately holds **no payload** — the push reads
+the row's *current* state, so earlier entries carry no information.
+
+**`app_secret` has no trigger and no upstream table.** The sync bearer
+token must not leave the device, and the guarantee is that no mechanism
+exists that could carry it — not a policy that something must remember.
+
+### Both halves are generated
+
+`scripts/gen-replica-sql.ts` reads `db/schema.sql` and writes the
+triggers back into it *and* the Postgres DDL in
+`db/supabase/0001_replica.sql`. Both were hand-written first and both
+were wrong the same way — guessed primary keys. `capture_timing` has no
+`id` column; six tables have composite keys. Run `npm run gen:replica`
+after changing the schema; a test fails if the checked-in file is stale.
+
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `SUPABASE_URL` | The project URL. Must be `https://`. |
+| `SUPABASE_SERVICE_KEY` | The **service** key, not the anon key — the replica denies anon everything by design. |
+
+Both or neither: a URL with no key fails on the first push rather than
+at boot, and the error there names PostgREST rather than the mistake.
+Neither set means replication is **disabled**, not open — same posture
+as `SYNC_TOKEN`.

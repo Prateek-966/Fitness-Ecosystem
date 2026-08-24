@@ -207,6 +207,8 @@ added in the dashboard.
 | `GARMIN_PASSWORD` | for sync | Its password. |
 | `SYNC_INTERVAL_MIN` | no | Default 180. Garmin publishes daily summaries a few times a day; polling faster earns nothing and spends goodwill with their rate limiter. Values under 15 are rejected. |
 | `GARMIN_ADAPTER` | no | `connect` (default) or `fake`, which serves deterministic data for testing without credentials. |
+| `SUPABASE_URL` | for replica | Project URL for the Postgres replica of your log. Must be `https://`. |
+| `SUPABASE_SERVICE_KEY` | for replica | The **service** key, not the anon key. It lives on the server only — the browser never holds a Supabase credential, which is what keeps `connect-src 'self'` intact. Unset both to disable replication. |
 | `SYNC_DB` | no | Where the server keeps tokens and the rolling window. The Dockerfile sets `/app/data/sync.sqlite3`, which is the disk mount below. |
 | `STATIC_DIR` | no | Where the built app is served from. The Dockerfile sets `/app/dist`. |
 

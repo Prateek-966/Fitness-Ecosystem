@@ -6,6 +6,8 @@ import { SyncStore } from './store.ts';
 import { Poller } from './poller.ts';
 import { FakeGarmin } from './garmin/fake.ts';
 import { ConnectGarmin } from './garmin/connect.ts';
+import { Supabase } from './supabase.ts';
+import { applyPush, MAX_PUSH_BYTES, readBody, validatePush } from './replica.ts';
 import type { GarminClient } from './garmin/client.ts';
 
 /**
@@ -122,6 +124,42 @@ export function createApp(cfg: Config, poller: Poller, store: SyncStore) {
         return json(res, 200, store.read(since));
       }
 
+      if (path === '/api/replica/status' && req.method === 'GET') {
+        return json(res, 200, { configured: cfg.supabase !== null });
+      }
+
+      if (path === '/api/replica/push' && req.method === 'POST') {
+        if (!cfg.supabase) {
+          return json(res, 503, {
+            error: 'replication is not configured on this server',
+            detail: 'Set SUPABASE_URL and SUPABASE_SERVICE_KEY to enable it.',
+          });
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(await readBody(req, MAX_PUSH_BYTES));
+        } catch (e) {
+          return json(res, 400, {
+            error: e instanceof Error && e.message === 'too large'
+              ? `push exceeds ${MAX_PUSH_BYTES} bytes` : 'body is not JSON',
+          });
+        }
+        const changes = validatePush(body);
+        if (!changes) return json(res, 400, { error: 'malformed push' });
+
+        try {
+          const applied = await applyPush(new Supabase(cfg.supabase), changes);
+          return json(res, 200, applied);
+        } catch (e) {
+          // The message names the table and what PostgREST said, because
+          // a bare 502 on a schema mismatch is undebuggable.
+          return json(res, 502, {
+            error: 'replica rejected the push',
+            detail: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+
       return json(res, 404, { error: 'no such endpoint' });
     }
 
@@ -194,7 +232,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`[sync] listening on ${cfg.port}, adapter=${cfg.adapter}, `
       + `interval=${cfg.intervalMin}min, `
       + `syncApi=${cfg.syncToken ? 'enabled' : 'DISABLED (no SYNC_TOKEN)'}, `
-      + `garminCredentials=${cfg.garmin ? 'set' : 'missing'}`);
+      + `garminCredentials=${cfg.garmin ? 'set' : 'missing'}, `
+      + `replica=${cfg.supabase ? 'configured' : 'off'}`);
 
     if (!cfg.syncToken) {
       console.warn('[sync] SYNC_TOKEN is not set, so the Garmin sync API is switched off. '

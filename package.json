@@ -21,7 +21,8 @@
     "test:hosted": "vite build && node tests/browser/hosted.mjs",
     "import-garmin": "tsx scripts/import-garmin.ts",
     "test:sync": "vite build && node tests/browser/sync-run.mjs",
-    "server": "node --experimental-strip-types server/src/index.ts"
+    "server": "node --experimental-strip-types server/src/index.ts",
+    "gen:replica": "node --experimental-strip-types scripts/gen-replica-sql.ts"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "^3.50.1-build1"

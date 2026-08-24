@@ -144,9 +144,14 @@ at 0. `npm run test:all` runs everything.
    verified from here** — only the build, and the server run locally the
    way the container runs it. Note that `raw.githubusercontent.com`
    *is* reachable, which is how the Garmin references were read.
-9. **The server store is still SQLite on a Render disk.** The owner has
-   connected Supabase and it is the better home for it — it removes the
-   disk requirement entirely and survives redeploys. Not yet moved.
+9. **The server store is still SQLite on a Render disk** that does not
+   exist — the service has no disk attached, so `/app/data` is wiped on
+   every deploy. The app's own data now replicates to Supabase; the
+   *server's* Garmin token and rolling window do not yet.
+10. **Replication is push-only.** Changes go up; nothing comes back
+   down. That gives durability and a queryable copy, not multi-device
+   editing — logging on a second device would not see the first one's
+   history. Pull and merge is the next piece.
 
 ---
 
@@ -185,7 +190,7 @@ Roughly in priority order. None of these are started.
 `energy` (BMR/targets/macros) · `cycling` (weekly redistribution) ·
 `insights` (cross-day aggregation, trends, projection) ·
 `advice` (the decision layer) · `learn` (the feedback loop) ·
-`reactions` (food-to-metric association) ·
+`reactions` (food-to-metric association) · `replicate` (change queue) ·
 `garmin` (file import) · `sync` (server client) · `healthify` ·
 `foodimport` · `settings` · `clock` · `timing` · `csv` · `db`
 
@@ -194,7 +199,7 @@ Roughly in priority order. None of these are started.
 Worker: `src/worker/db-worker.ts`.
 
 **Server** (`server/src/`): `index` (HTTP) · `config` · `store` ·
-`poller` · `garmin/{client,connect,fake}`.
+`poller` · `garmin/{client,connect,fake}` · `supabase` · `replica`.
 
 **Data model:** `db/schema.sql` is authoritative and heavily commented.
 `db/seed.sql` runs on every open and carries additive migrations.
